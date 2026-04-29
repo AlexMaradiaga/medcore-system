@@ -41,6 +41,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- SEGURIDAD: SOLO DOCTORES ---
     Route::middleware('role:Doctor')->group(function () {
+        // Rutas para el Dashboard
+        Route::get('doctor/stats/{usuarioId}', [AppointmentController::class, 'getDoctorStats']);
+        Route::get('doctor/citas/{usuarioId}', [AppointmentController::class, 'getAppointmentsByDoctorUser']);
+
+        // Rutas de gestión de consulta
         Route::get('citas/doctor/{doctorId}', [AppointmentController::class, 'getByDoctor']);
         Route::post('citas/finalizar', [AppointmentController::class, 'complete']);
     });
@@ -48,7 +53,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // --- SEGURIDAD: SOLO PACIENTES ---
     Route::middleware('role:Paciente')->group(function () {
         Route::post('citas', [AppointmentController::class, 'store']);
+        Route::get('citas/historial/{usuarioId}', [AppointmentController::class, 'getHistoryByPatient']);
         Route::put('citas/{id}/reprogramar', [AppointmentController::class, 'reschedule']);
+        Route::get('recetas/pdf/{recetaId}', [App\Http\Controllers\Api\AppointmentController::class, 'descargarReceta']);
     });
 
     // --- ACCESO COMPARTIDO ---

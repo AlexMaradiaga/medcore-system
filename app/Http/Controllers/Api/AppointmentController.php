@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Core\Appointments\Domain\Ports\AppointmentRepositoryInterface;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class AppointmentController extends Controller
 {
@@ -64,9 +65,18 @@ class AppointmentController extends Controller
 
     public function destroy($id): JsonResponse
     {
-        $this->repository->cancel((int)$id, "Cancelada por el usuario");
-
-        return response()->json(['status' => 'success', 'message' => 'Cita cancelada correctamente']);
+        try {
+            $this->repository->cancel((int)$id, "Cancelada desde el portal");
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Cita cancelada correctamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No se pudo cancelar la cita: ' . $e->getMessage()
+            ], 400);
+        }
     }
 
     public function complete(Request $request): JsonResponse
@@ -87,6 +97,81 @@ class AppointmentController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function getHistoryByPatient($usuarioId): JsonResponse
+    {
+        try {
+            $history = $this->repository->getHistoryByPatient((int)$usuarioId);
+
+            return response()->json($history);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function descargarReceta($recetaId): \Illuminate\Http\Response | JsonResponse
+    {
+        try {
+            $datos = DB::selectOne("
+                SELECT
+                    R.RecetaID,
+                    C.FechaHora,
+                    D.Nombre + ' ' + D.Apellido as Doctor,
+                    ESP.NombreEspecialidad as Especialidad,
+                    P.Nombre + ' ' + P.Apellido as Paciente,
+                    P.Edad,
+                    R.DetalleMedicamentos
+                FROM Recetas R
+                JOIN Consultas CON ON R.ConsultaID = CON.ConsultaID
+                JOIN Citas C ON CON.CitaID = C.CitaID
+                JOIN Doctores D ON C.DoctorID = D.DoctorID
+                JOIN Especialidades ESP ON D.EspecialidadID = ESP.EspecialidadID
+                JOIN Pacientes P ON C.PacienteID = P.PacienteID
+                WHERE R.RecetaID = ?
+            ", [$recetaId]);
+
+            if (!$datos) {
+                return response()->json(['error' => 'Receta no encontrada'], 404);
+            }
+            $pdf = Pdf::loadView('pdf.receta', ['data' => $datos]);
+
+            return $pdf->download("Receta_{$recetaId}.pdf", [
+                'Content-Type' => 'application/pdf',
+                'Access-Control-Expose-Headers' => 'Content-Disposition'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+    public function getDoctorStats($usuarioId): JsonResponse
+    {
+        try {
+            $stats = $this->repository->getDoctorStats((int)$usuarioId);
+            return response()->json($stats);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
+        }
+    }
+
+    public function getAppointmentsByDoctorUser($usuarioId): JsonResponse
+    {
+        try {
+            $appointments = $this->repository->getAppointmentsByDoctorUser((int)$usuarioId);
+            return response()->json($appointments);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage()
+            ], 400);
         }
     }
 }

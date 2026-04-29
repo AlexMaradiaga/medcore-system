@@ -4,6 +4,7 @@ namespace App\Core\Appointments\Infrastructure\Repositories;
 
 use App\Core\Appointments\Domain\Ports\AppointmentRepositoryInterface;
 use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class SqlAppointmentRepository implements AppointmentRepositoryInterface
 {
@@ -29,21 +30,21 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
 
         return DB::transaction(function () use ($data) {
             return DB::statement('EXEC sp_AgendarCita ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?', [
-                $data['UsuarioID'],                         // 1
-                $data['doctor_id'],                         // 2
-                $data['entidad_id'],                        // 3
-                $data['fecha_hora'],                        // 4
-                $data['motivo'],                            // 5
-                $data['estado_cita'] ?? 'Pendiente',        // 6
-                $data['sintomas'] ?? null,                  // 7
-                $data['alergias'] ?? null,                  // 8
-                $data['edad'],                              // 9
-                $data['genero'],                            // 10
-                $data['aseguradora'] ?? null,               // 11
-                $data['numero_poliza'] ?? null,             // 12
-                $data['nombre_contacto_emergencia'],        // 13
-                $data['telefono_contacto_emergencia'],      // 14
-                $data['medicamentos_actuales'] ?? null      // 15
+                $data['UsuarioID'],
+                $data['doctor_id'],
+                $data['entidad_id'],
+                $data['fecha_hora'],
+                $data['motivo'],
+                $data['estado_cita'] ?? 'Pendiente',
+                $data['sintomas'] ?? null,
+                $data['alergias'] ?? null,
+                $data['edad'],
+                $data['genero'],
+                $data['aseguradora'] ?? null,
+                $data['numero_poliza'] ?? null,
+                $data['nombre_contacto_emergencia'],
+                $data['telefono_contacto_emergencia'],
+                $data['medicamentos_actuales'] ?? null
             ]);
         });
     }
@@ -68,18 +69,26 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         ", [$doctorId]);
     }
 
-    public function getHistoryByPatient(int $pacienteId): array
+    public function getHistoryByPatient(int $usuarioId): array
     {
         return DB::select("
-            SELECT C.CitaID, C.FechaHora, C.EstadoCita,
-                   D.Nombre + ' ' + D.Apellido as Doctor,
-                   E.NombreEntidad as Clinica
+            SELECT
+                C.CitaID,
+                C.FechaHora,
+                C.EstadoCita,
+                C.Motivo,
+                C.Sintomas,      -- Agregado
+                C.Alergias,      -- Agregado
+                C.MedicamentosActuales, -- Agregado
+                D.Nombre + ' ' + D.Apellido as Doctor,
+                E.NombreEntidad as Clinica
             FROM Citas C
+            JOIN Pacientes P ON C.PacienteID = P.PacienteID
             JOIN Doctores D ON C.DoctorID = D.DoctorID
             JOIN Entidades E ON C.EntidadID = E.EntidadID
-            WHERE C.PacienteID = ? AND C.Estado = 1
+            WHERE P.UsuarioID = ? AND C.Estado = 1
             ORDER BY C.FechaHora DESC
-        ", [$pacienteId]);
+        ", [$usuarioId]);
     }
 
     public function reschedule(int $citaId, string $nuevaFechaHora): bool
@@ -103,12 +112,18 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
 
     public function cancel(int $citaId, string $motivoCancelacion = null): bool
     {
-        return DB::table('Citas')
-            ->where('CitaID', $citaId)
-            ->update([
-                'EstadoCita' => 'Cancelada',
-                'Motivo' => $motivoCancelacion ? DB::raw("Motivo + ' (Cancelado: $motivoCancelacion)'") : DB::raw("Motivo")
-            ]);
+        try {
+            return DB::table('Citas')
+                ->where('CitaID', $citaId)
+                ->update([
+                    'EstadoCita' => 'Cancelada',
+                    'Motivo' => $motivoCancelacion
+                        ? DB::raw("ISNULL(Motivo, '') + ' (Cancelado: $motivoCancelacion)'")
+                        : 'Cancelada por el paciente'
+                ]);
+        } catch (\Exception $e) {
+            throw new \Exception("Error al cancelar en base de datos: " . $e->getMessage());
+        }
     }
 
     public function complete(array $data): bool
@@ -171,5 +186,120 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
             (SELECT COUNT(*) FROM Citas WHERE EstadoCita = 'Pendiente') as citas_pendientes");
 
         return (array) $result[0];
+    }
+
+    public function getMedicalHistory(int $usuarioId): array {
+        return DB::select("
+            SELECT
+                CON.ConsultaID, C.FechaHora, D.Nombre + ' ' + D.Apellido as Doctor,
+                E.NombreEntidad as Clinica, CON.Diagnostico, CON.NotasMedicas,
+                ESP.NombreEspecialidad as Especialidad
+            FROM Consultas CON
+            JOIN Citas C ON CON.CitaID = C.CitaID
+            JOIN Pacientes P ON C.PacienteID = P.PacienteID
+            JOIN Doctores D ON C.DoctorID = D.DoctorID
+            JOIN Entidades E ON C.EntidadID = E.EntidadID
+            JOIN Especialidades ESP ON D.EspecialidadID = ESP.EspecialidadID
+            WHERE P.UsuarioID = ?
+            ORDER BY C.FechaHora DESC
+        ", [$usuarioId]);
+    }
+
+    public function getExams(int $usuarioId): array {
+        return DB::select("
+            SELECT ExamenID, NombreExamen as Titulo, FechaExamen as Fecha,
+                ResultadoPath as ArchivoUrl, DoctorSolicitante as Doctor
+            FROM Examenes E
+            JOIN Pacientes P ON E.PacienteID = P.PacienteID
+            WHERE P.UsuarioID = ?
+            ORDER BY FechaExamen DESC
+        ", [$usuarioId]);
+    }
+
+    public function getPrescriptions(int $usuarioId): array {
+        return DB::select("
+            SELECT R.RecetaID, C.FechaHora as Fecha, D.Nombre + ' ' + D.Apellido as Doctor,
+                R.DetalleMedicamentos, R.YaCanjeada
+            FROM Recetas R
+            JOIN Consultas CON ON R.ConsultaID = CON.ConsultaID
+            JOIN Citas C ON CON.CitaID = C.CitaID
+            JOIN Pacientes P ON C.PacienteID = P.PacienteID
+            JOIN Doctores D ON C.DoctorID = D.DoctorID
+            WHERE P.UsuarioID = ?
+            ORDER BY C.FechaHora DESC
+        ", [$usuarioId]);
+    }
+    public function descargarReceta($recetaId)
+    {
+        $datos = DB::selectOne("
+            SELECT
+                R.RecetaID,
+                C.FechaHora,
+                D.Nombre + ' ' + D.Apellido as Doctor,
+                ESP.NombreEspecialidad as Especialidad,
+                P.Nombre + ' ' + P.Apellido as Paciente,
+                R.DetalleMedicamentos
+            FROM Recetas R
+            JOIN Consultas CON ON R.ConsultaID = CON.ConsultaID
+            JOIN Citas C ON CON.CitaID = C.CitaID
+            JOIN Doctores D ON C.DoctorID = D.DoctorID
+            JOIN Especialidades ESP ON D.EspecialidadID = ESP.EspecialidadID
+            JOIN Pacientes P ON C.PacienteID = P.PacienteID
+            WHERE R.RecetaID = ?
+        ", [$recetaId]);
+
+        if (!$datos) return response()->json(['error' => 'Receta no encontrada'], 404);
+
+        $pdf = Pdf::loadView('pdf.receta', ['receta' => $datos]);
+
+        return $pdf->download("Receta_#{$recetaId}.pdf");
+
+
+    }
+    public function getDoctorStats(int $usuarioId): array
+    {
+        $doctor = DB::table('Doctores')->where('UsuarioID', $usuarioId)->first();
+
+        if (!$doctor) return ['citas_hoy' => 0, 'atendidos' => 0, 'pendientes' => 0];
+
+        $hoy = date('Y-m-d');
+
+        return [
+            'citas_hoy' => DB::table('Citas')
+                ->where('DoctorID', $doctor->DoctorID)
+                ->whereDate('FechaHora', $hoy)
+                ->where('Estado', 1)
+                ->count(),
+            'atendidos' => DB::table('Citas')
+                ->where('DoctorID', $doctor->DoctorID)
+                ->where('EstadoCita', 'Completada')
+                ->count(),
+            'pendientes' => DB::table('Citas')
+                ->where('DoctorID', $doctor->DoctorID)
+                ->where('EstadoCita', 'Pendiente')
+                ->where('Estado', 1)
+                ->count(),
+        ];
+    }
+
+    public function getAppointmentsByDoctorUser(int $usuarioId): array
+    {
+        return DB::select("
+            SELECT
+                C.CitaID,
+                C.FechaHora,
+                C.Motivo,
+                C.Sintomas,
+                P.Nombre + ' ' + P.Apellido as Paciente,
+                P.Edad,
+                P.Genero
+            FROM Citas C
+            JOIN Pacientes P ON C.PacienteID = P.PacienteID
+            JOIN Doctores D ON C.DoctorID = D.DoctorID
+            WHERE D.UsuarioID = ?
+            AND C.EstadoCita = 'Pendiente'
+            AND C.Estado = 1
+            ORDER BY C.FechaHora ASC
+        ", [$usuarioId]);
     }
 }

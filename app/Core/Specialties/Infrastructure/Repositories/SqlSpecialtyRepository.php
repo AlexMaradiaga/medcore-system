@@ -7,12 +7,10 @@ use Illuminate\Support\Facades\DB;
 class SqlSpecialtyRepository implements SpecialtyRepositoryInterface {
 
     public function getAllActive(): array {
-        // Cambiamos SpecialtyID por EspecialidadID
         return DB::select('SELECT EspecialidadID as EspecialidadID, NombreEspecialidad as NombreEspecialidad FROM Especialidades WHERE Estado = 1');
     }
 
     public function findById(int $id): ?object {
-        // Cambiamos SpecialtyID por EspecialidadID
         return DB::table('Especialidades')->where('EspecialidadID', $id)->first();
     }
 
@@ -25,13 +23,13 @@ class SqlSpecialtyRepository implements SpecialtyRepositoryInterface {
 
     public function update(int $id, array $data): bool {
         return DB::table('Especialidades')
-            ->where('EspecialidadID', $id) // Corregido aquí también
+            ->where('EspecialidadID', $id)
             ->update(['NombreEspecialidad' => $data['nombre']]);
     }
 
     public function delete(int $id): bool {
         return DB::table('Especialidades')
-            ->where('EspecialidadID', $id) // Corregido aquí también
+            ->where('EspecialidadID', $id) 
             ->update(['Estado' => 0]);
     }
 }

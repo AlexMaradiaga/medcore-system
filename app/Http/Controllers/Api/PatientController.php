@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-// IMPORTANTE: Asegúrate de tener estas dos importaciones
 use App\Core\Patients\Application\Handlers\RegisterPatientHandler;
 use App\Core\Patients\Domain\Ports\PatientRepositoryInterface;
 
@@ -49,10 +48,10 @@ class PatientController extends Controller
             ], 400);
         }
     }
-    public function index(): JsonResponse 
+    public function index(): JsonResponse
     {
-        $data = $this->repository->obtenerTodos(); 
-    
+        $data = $this->repository->obtenerTodos();
+
         return response()->json([
             'status' => 'success',
             'count'  => count($data),
@@ -60,7 +59,7 @@ class PatientController extends Controller
         ]);
     }
 
-    public function update(Request $request, $id): JsonResponse 
+    public function update(Request $request, $id): JsonResponse
     {
         try {
             $validated = $request->validate([
@@ -74,28 +73,28 @@ class PatientController extends Controller
             $this->repository->update((int)$id, $validated);
 
             return response()->json([
-                'status' => 'success', 
+                'status' => 'success',
                 'message' => 'Datos de paciente actualizados'
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error', 
+                'status' => 'error',
                 'message' => $e->getMessage()
             ], 400);
         }
     }
 
-    public function destroy($id): JsonResponse 
+    public function destroy($id): JsonResponse
     {
         try {
             $this->repository->delete((int)$id);
             return response()->json([
-                'status' => 'success', 
+                'status' => 'success',
                 'message' => 'Paciente desactivado'
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error', 
+                'status' => 'error',
                 'message' => $e->getMessage()
             ], 400);
         }

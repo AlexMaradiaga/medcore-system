@@ -11,11 +11,9 @@ use App\Core\Doctors\Domain\Ports\DoctorRepositoryInterface;
 
 class DoctorController extends Controller
 {
-    // Definimos ambas propiedades
     private $handler;
     private $repository;
 
-    // Inyectamos ambos en el constructor
     public function __construct(
         RegisterDoctorHandler $handler,
         DoctorRepositoryInterface $repository

@@ -27,15 +27,13 @@ class ReportController extends Controller
     public function dashboardStats()
     {
         try {
-            // Llamamos al método que definimos en la interfaz y el repositorio
             $stats = $this->repository->getStats();
-            
+
             return response()->json([
                 'status' => 'success',
                 'data' => $stats
             ]);
         } catch (\Exception $e) {
-            // Esto te dirá exactamente qué falla en el JSON de Postman
             return response()->json([
                 'status' => 'error',
                 'message' => $e->getMessage()

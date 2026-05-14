@@ -22,7 +22,6 @@ class LoginHandler
             throw new Exception("Credenciales inválidas.");
         }
 
-        // Aquí podrías generar un token JWT o Sanctum si lo deseas
         return $usuario;
     }
 }

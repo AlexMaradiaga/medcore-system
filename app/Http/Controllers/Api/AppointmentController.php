@@ -87,6 +87,9 @@ class AppointmentController extends Controller
                 'diagnostico' => 'required|string',
                 'notas_medicas' => 'nullable|string',
                 'detalle_medicamentos' => 'required|string',
+                'signos_vitales' => 'required|array',
+                'examen_fisico_opciones' => 'required|array',
+                'examen_fisico_notas' => 'nullable|array',
             ]);
 
             $this->repository->complete($validated);
@@ -172,6 +175,28 @@ class AppointmentController extends Controller
                 'status' => 'error',
                 'message' => $e->getMessage()
             ], 400);
+        }
+    }
+
+    public function approve($id): JsonResponse
+    {
+        try {
+            $this->repository->approve((int)$id);
+            return response()->json(['status' => 'success', 'message' => 'Cita aprobada']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function reject(Request $request, $id): JsonResponse
+    {
+        try {
+            $motivo = $request->input('motivo', 'Rechazada por el médico');
+            $this->repository->cancel((int)$id, $motivo);
+
+            return response()->json(['status' => 'success', 'message' => 'Cita rechazada']);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
         }
     }
 }

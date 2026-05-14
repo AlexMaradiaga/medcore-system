@@ -44,10 +44,15 @@ Route::middleware('auth:sanctum')->group(function () {
         // Rutas para el Dashboard
         Route::get('doctor/stats/{usuarioId}', [AppointmentController::class, 'getDoctorStats']);
         Route::get('doctor/citas/{usuarioId}', [AppointmentController::class, 'getAppointmentsByDoctorUser']);
+        Route::post('doctor/cita/aprobar/{id}', [AppointmentController::class, 'approve']);
+        Route::post('doctor/cita/rechazar/{id}', [AppointmentController::class, 'reject']);
 
         // Rutas de gestión de consulta
         Route::get('citas/doctor/{doctorId}', [AppointmentController::class, 'getByDoctor']);
-        Route::post('citas/finalizar', [AppointmentController::class, 'complete']);
+        Route::post('doctor/consulta/finalizar', [AppointmentController::class, 'complete']);
+
+        // NUEVA RUTA: Historial Clínico del Paciente
+        Route::get('doctor/paciente/{id}/historial-completo', [HistoryController::class, 'getFullHistory']);
     });
 
     // --- SEGURIDAD: SOLO PACIENTES ---

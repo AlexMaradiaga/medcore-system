@@ -11,7 +11,6 @@ class Rol extends Model
 
     protected $primaryKey = 'RolID';
 
-    // Desactivamos timestamps porque la tabla Roles no tiene 'created_at' ni 'updated_at'
     public $timestamps = false;
 
     protected $fillable = [
@@ -19,7 +18,7 @@ class Rol extends Model
         'Estado'
     ];
 
-    
+
     public function usuarios(): HasMany
     {
         return $this->hasMany(User::class, 'RolID', 'RolID');

@@ -50,23 +50,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
     }
 
     public function getPendingByDoctor(int $doctorId): array {
-        return DB::select("
-            SELECT
-                C.CitaID,
-                C.FechaHora,
-                C.Motivo,
-                C.Sintomas, -- Traemos los síntomas de la tabla Citas
-                P.Nombre + ' ' + P.Apellido as Paciente,
-                P.Telefono,
-                P.Aseguradora, -- Traemos el seguro del perfil del Paciente
-                P.NombreContactoEmergencia as ContactoEmergencia
-            FROM Citas C
-            JOIN Pacientes P ON C.PacienteID = P.PacienteID
-            WHERE C.DoctorID = ?
-            AND C.EstadoCita = 'Pendiente'
-            AND C.Estado = 1
-            ORDER BY C.FechaHora ASC
-        ", [$doctorId]);
+       return DB::select("EXEC sp_ObtenerCitasDashboardDoctor ?", [$usuarioId]);
     }
 
     public function getHistoryByPatient(int $usuarioId): array
@@ -77,11 +61,14 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 C.FechaHora,
                 C.EstadoCita,
                 C.Motivo,
-                C.Sintomas,      -- Agregado
-                C.Alergias,      -- Agregado
-                C.MedicamentosActuales, -- Agregado
+                C.Sintomas,
+                C.Alergias,
+                C.MedicamentosActuales,
                 D.Nombre + ' ' + D.Apellido as Doctor,
-                E.NombreEntidad as Clinica
+                E.NombreEntidad as Clinica,
+                P.Edad,
+                P.Genero,
+                C.EstadoCita
             FROM Citas C
             JOIN Pacientes P ON C.PacienteID = P.PacienteID
             JOIN Doctores D ON C.DoctorID = D.DoctorID
@@ -127,25 +114,82 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
     }
 
     public function complete(array $data): bool
-    {
-        $cita = DB::table('Citas')->where('CitaID', $data['cita_id'])->first();
+{
+    $data = json_decode(json_encode($data), true);
+    \Log::info('Procesando finalización de consulta:', ['cita_id' => $data['cita_id'] ?? 'N/A']);
+
+    if (!isset($data['signos_vitales']) || !isset($data['examen_fisico_opciones'])) {
+        throw new \Exception("La estructura de datos de la consulta está incompleta.");
+    }
+
+    return DB::transaction(function () use ($data) {
+        $citaId = $data['cita_id'];
+
+        $cita = DB::table('Citas')->where('CitaID', $citaId)->first();
 
         if (!$cita) {
-            throw new \Exception("La cita no existe.");
+            throw new \Exception("La cita ID: {$citaId} no existe.");
         }
 
-        if ($cita->EstadoCita !== 'Pendiente') {
-            throw new \Exception("No se puede finalizar una cita que está {$cita->EstadoCita}. Solo se pueden finalizar citas 'Pendientes'.");
+        if ($cita->EstadoCita !== 'Confirmada') {
+            throw new \Exception("La cita debe estar 'Confirmada' para finalizarla. Estado actual: {$cita->EstadoCita}");
         }
-        return DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
-            $data['cita_id'],
+
+        DB::table('Citas')->where('CitaID', $citaId)->update([
+            'Motivo' => $data['notas_medicas'] ?? $cita->Motivo
+        ]);
+
+        DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
+            $citaId,
             $data['diagnostico'],
             $data['notas_medicas'] ?? null,
             $data['detalle_medicamentos'],
             'Completada'
         ]);
-    }
 
+        $consultaId = DB::table('Consultas')
+            ->where('CitaID', $citaId)
+            ->value('ConsultaID');
+
+        if (!$consultaId) {
+            throw new \Exception("Error crítico: No se pudo localizar el registro de consulta generado.");
+        }
+
+        $sv = $data['signos_vitales'];
+        DB::table('Consulta_SignosVitales')->insert([
+            'ConsultaID'             => $consultaId,
+            'PresionArterial'        => $sv['presion'] ?? null,
+            'FrecuenciaCardiaca'     => (int)($sv['pulso'] ?? 0),
+            'Temperatura'            => (float)($sv['temp'] ?? 0),
+            'FrecuenciaRespiratoria' => (int)($sv['respiracion'] ?? 0),
+            'FechaRegistro'          => now()
+        ]);
+
+        foreach ($data['examen_fisico_opciones'] as $sistemaId => $hallazgos) {
+
+            $esNormal = empty(array_filter($hallazgos));
+
+            $examenSistemaId = DB::table('Consulta_Examen_Sistemas')->insertGetId([
+                'ConsultaID'       => $consultaId,
+                'SistemaID'        => $sistemaId,
+                'EsNormal'         => $esNormal ? 1 : 0,
+                'NotasAdicionales' => $data['examen_fisico_notas'][$sistemaId] ?? null,
+                'CreadoEn'         => now()
+            ]);
+
+            foreach ($hallazgos as $nombreHallazgo => $marcado) {
+                if ($marcado === true || $marcado === 1 || $marcado === "true") {
+                    DB::table('Consulta_Hallazgos')->insert([
+                        'ExamenSistemaID' => $examenSistemaId,
+                        'NombreHallazgo'  => $nombreHallazgo
+                    ]);
+                }
+            }
+        }
+
+        return true;
+    });
+}
     public function getDoctorAgenda(int $doctorId): array
     {
         return DB::table('vw_ReporteCitasLogistica')
@@ -292,14 +336,28 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 C.Sintomas,
                 P.Nombre + ' ' + P.Apellido as Paciente,
                 P.Edad,
-                P.Genero
+                P.Genero,
+                P.Telefono,
+                U_Pac.Email as EmailPaciente,    -- El email viene de Usuarios, no de Pacientes
+                C.Alergias,
+                C.MedicamentosActuales,
+                U_Doc.Email as EmailDoctor,     -- Email del doctor desde Usuarios
+                C.EstadoCita
             FROM Citas C
-            JOIN Pacientes P ON C.PacienteID = P.PacienteID
-            JOIN Doctores D ON C.DoctorID = D.DoctorID
+            INNER JOIN Pacientes P ON C.PacienteID = P.PacienteID
+            INNER JOIN Usuarios U_Pac ON P.UsuarioID = U_Pac.UsuarioID -- Join para email del paciente
+            INNER JOIN Doctores D ON C.DoctorID = D.DoctorID
+            INNER JOIN Usuarios U_Doc ON D.UsuarioID = U_Doc.UsuarioID -- Join para email del doctor
             WHERE D.UsuarioID = ?
-            AND C.EstadoCita = 'Pendiente'
+            AND C.EstadoCita IN ('Pendiente', 'Confirmada', 'Completada')
             AND C.Estado = 1
             ORDER BY C.FechaHora ASC
         ", [$usuarioId]);
+    }
+    public function approve(int $citaId): bool
+    {
+        return DB::table('Citas')
+            ->where('CitaID', $citaId)
+            ->update(['EstadoCita' => 'Confirmada']);
     }
 }

@@ -79,7 +79,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
     }
 
     public function getAllActive(array $filters = []): array {
-        // Iniciamos la consulta uniendo Doctores con Especialidades para obtener el nombre
         $query = DB::table('Doctores as D')
             ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
             ->select(
@@ -92,7 +91,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             )
             ->where('D.Estado', 1);
 
-        // Filtro por nombre o apellido (Búsqueda solicitada)
         if (!empty($filters['search'])) {
             $searchTerm = '%' . $filters['search'] . '%';
             $query->where(function($q) use ($searchTerm) {
@@ -101,12 +99,20 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             });
         }
 
-        // Filtro por nombre de especialidad (v-model="filters.especialidad" en Vue)
         if (!empty($filters['especialidad'])) {
             $query->where('E.NombreEspecialidad', $filters['especialidad']);
         }
 
-        // Ejecutar y retornar como array
         return $query->get()->toArray();
+    }
+    public function getFullHistory(int $pacienteId, int $doctorId): array
+    {
+        $results = DB::select("EXEC sp_ObtenerHistorialClinico ?, ?", [$pacienteId, $doctorId]);
+
+        return [
+            'consultations' => $results,
+            'comparatives' => [],
+            'labResults' => [] 
+        ];
     }
 }

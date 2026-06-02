@@ -8,7 +8,8 @@ use App\Http\Controllers\Api\{
     SpecialtyController,
     ClinicController,
     AppointmentController,
-    ReportController
+    ReportController,
+    HistoryController
 };
 
 // RUTAS PÚBLICAS
@@ -49,10 +50,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Rutas de gestión de consulta
         Route::get('citas/doctor/{doctorId}', [AppointmentController::class, 'getByDoctor']);
-        Route::post('doctor/consulta/finalizar', [AppointmentController::class, 'complete']);
+        Route::post('doctor/consulta/finalizar', [HistoryController::class, 'complete']);
 
-        // NUEVA RUTA: Historial Clínico del Paciente
-        Route::get('doctor/paciente/{id}/historial-completo', [HistoryController::class, 'getFullHistory']);
+        //Historial Clínico del Paciente
+        Route::get('/doctor/paciente/{pacienteId}/historial-completo', [HistoryController::class, 'obtenerHistorialCompleto']);
+        //Para el catálogo de "Mis Pacientes" (solo los atendidos por este doctor)
+        Route::get('/doctor/mis-pacientes', [HistoryController::class, 'obtenerMisPacientesAtendidos']);
+        // Historial Clinico con permiso para ver el de otros doctores
+        Route::post('/doctor/paciente/conceder-autorizacion', [HistoryController::class, 'concederAutorizacionGlobal']);
+        //Detalle de consulta medica
+        Route::get('/doctor/consulta/detalle', [HistoryController::class, 'obtenerDetalleConsulta']);
+        //Receta medica
+        Route::get('/medico/consulta/receta', [HistoryController::class, 'obtenerRecetaPorConsulta']);
+        //Buscar Diagnostico
+        Route::get('/doctor/diagnosticos/buscar', [HistoryController::class, 'buscarDiagnosticosCIE11']);
     });
 
     // --- SEGURIDAD: SOLO PACIENTES ---

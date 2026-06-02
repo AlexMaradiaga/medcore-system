@@ -12,4 +12,10 @@ interface DoctorRepositoryInterface {
     public function update(int $id, array $datos): bool;
 
     public function delete(int $id): bool;
+
+    public function getFullHistory(int $pacienteId, int $doctorId): array;
+
+    public function obtenerMisPacientesAtendidos(int $doctorId): array;
+
+    public function complete(array $data): bool;
 }

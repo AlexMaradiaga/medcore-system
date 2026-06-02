@@ -79,29 +79,7 @@ class AppointmentController extends Controller
         }
     }
 
-    public function complete(Request $request): JsonResponse
-    {
-        try {
-            $validated = $request->validate([
-                'cita_id' => 'required|integer',
-                'diagnostico' => 'required|string',
-                'notas_medicas' => 'nullable|string',
-                'detalle_medicamentos' => 'required|string',
-                'signos_vitales' => 'required|array',
-                'examen_fisico_opciones' => 'required|array',
-                'examen_fisico_notas' => 'nullable|array',
-            ]);
-
-            $this->repository->complete($validated);
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Consulta finalizada y receta generada con éxito'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
-        }
-    }
+   
 
     public function getHistoryByPatient($usuarioId): JsonResponse
     {

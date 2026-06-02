@@ -114,82 +114,34 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
     }
 
     public function complete(array $data): bool
-{
-    $data = json_decode(json_encode($data), true);
-    \Log::info('Procesando finalización de consulta:', ['cita_id' => $data['cita_id'] ?? 'N/A']);
+    {
+        $data = json_decode(json_encode($data), true);
+        \Log::info('Procesando finalización de consulta masiva por SP:', ['cita_id' => $data['cita_id'] ?? 'N/A']);
 
-    if (!isset($data['signos_vitales']) || !isset($data['examen_fisico_opciones'])) {
-        throw new \Exception("La estructura de datos de la consulta está incompleta.");
-    }
-
-    return DB::transaction(function () use ($data) {
-        $citaId = $data['cita_id'];
-
-        $cita = DB::table('Citas')->where('CitaID', $citaId)->first();
-
-        if (!$cita) {
-            throw new \Exception("La cita ID: {$citaId} no existe.");
+        if (!isset($data['signos_vitales']) || !isset($data['examen_fisico_opciones'])) {
+            throw new \Exception("La estructura de datos de la consulta está incompleta.");
         }
 
+        $cita = DB::table('Citas')->where('CitaID', $data['cita_id'])->first();
+        if (!$cita) {
+            throw new \Exception("La cita ID: {$data['cita_id']} no existe.");
+        }
         if ($cita->EstadoCita !== 'Confirmada') {
             throw new \Exception("La cita debe estar 'Confirmada' para finalizarla. Estado actual: {$cita->EstadoCita}");
         }
 
-        DB::table('Citas')->where('CitaID', $citaId)->update([
-            'Motivo' => $data['notas_medicas'] ?? $cita->Motivo
-        ]);
+        $payloadJsonStr = json_encode($data);
 
         DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
-            $citaId,
+            $data['cita_id'],
             $data['diagnostico'],
             $data['notas_medicas'] ?? null,
-            $data['detalle_medicamentos'],
+            $payloadJsonStr,
             'Completada'
         ]);
 
-        $consultaId = DB::table('Consultas')
-            ->where('CitaID', $citaId)
-            ->value('ConsultaID');
-
-        if (!$consultaId) {
-            throw new \Exception("Error crítico: No se pudo localizar el registro de consulta generado.");
-        }
-
-        $sv = $data['signos_vitales'];
-        DB::table('Consulta_SignosVitales')->insert([
-            'ConsultaID'             => $consultaId,
-            'PresionArterial'        => $sv['presion'] ?? null,
-            'FrecuenciaCardiaca'     => (int)($sv['pulso'] ?? 0),
-            'Temperatura'            => (float)($sv['temp'] ?? 0),
-            'FrecuenciaRespiratoria' => (int)($sv['respiracion'] ?? 0),
-            'FechaRegistro'          => now()
-        ]);
-
-        foreach ($data['examen_fisico_opciones'] as $sistemaId => $hallazgos) {
-
-            $esNormal = empty(array_filter($hallazgos));
-
-            $examenSistemaId = DB::table('Consulta_Examen_Sistemas')->insertGetId([
-                'ConsultaID'       => $consultaId,
-                'SistemaID'        => $sistemaId,
-                'EsNormal'         => $esNormal ? 1 : 0,
-                'NotasAdicionales' => $data['examen_fisico_notas'][$sistemaId] ?? null,
-                'CreadoEn'         => now()
-            ]);
-
-            foreach ($hallazgos as $nombreHallazgo => $marcado) {
-                if ($marcado === true || $marcado === 1 || $marcado === "true") {
-                    DB::table('Consulta_Hallazgos')->insert([
-                        'ExamenSistemaID' => $examenSistemaId,
-                        'NombreHallazgo'  => $nombreHallazgo
-                    ]);
-                }
-            }
-        }
-
         return true;
-    });
-}
+    }
     public function getDoctorAgenda(int $doctorId): array
     {
         return DB::table('vw_ReporteCitasLogistica')

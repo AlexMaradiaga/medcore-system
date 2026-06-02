@@ -15,7 +15,6 @@ class CheckRole
      */
     public function handle(Request $request, Closure $next, string $role): Response
     {
-        // 1. Verificamos que el usuario esté logueado
         if (!$request->user()) {
             return response()->json(['message' => 'No autenticado.'], 401);
         }

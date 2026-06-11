@@ -9,7 +9,8 @@ use App\Http\Controllers\Api\{
     ClinicController,
     AppointmentController,
     ReportController,
-    HistoryController
+    HistoryController,
+    AdminController
 };
 
 // RUTAS PÚBLICAS
@@ -24,6 +25,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // --- SEGURIDAD: SOLO ADMINISTRADORES ---
     Route::middleware('role:Admin')->group(function () {
+
+        Route::get('admin/usuarios', [AdminController::class, 'obtenerUsuarios']);
+        Route::post('admin/doctores', [AdminController::class, 'registrarDoctor']);
 
         // Gestión de Doctores (Solo Admin crea/edita/borra)
         Route::prefix('doctores')->group(function () {
@@ -71,7 +75,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('citas', [AppointmentController::class, 'store']);
         Route::get('citas/historial/{usuarioId}', [AppointmentController::class, 'getHistoryByPatient']);
         Route::put('citas/{id}/reprogramar', [AppointmentController::class, 'reschedule']);
-        Route::get('recetas/pdf/{recetaId}', [App\Http\Controllers\Api\AppointmentController::class, 'descargarReceta']);
+        // Generador PDF del Visualizador
+        Route::get('recetas/pdf/{recetaId}', [AppointmentController::class, 'descargarReceta']);
+       // Historial
+        Route::get('historial/consultas/{usuarioId}', [AppointmentController::class, 'getHistoryByPatient']);
+       //Listado del paciente
+        Route::get('historial/recetas/{usuarioId}', [AppointmentController::class, 'getPrescriptionsByPatient']);
+        Route::get('historial/examenes/{usuarioId}', [AppointmentController::class, 'getExamsByPatient']);
     });
 
     // --- ACCESO COMPARTIDO ---
@@ -80,4 +90,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('doctores', [DoctorController::class, 'index']);
     Route::get('reports/appointments', [ReportController::class, 'appointmentsReport']);
     Route::delete('citas/{id}', [AppointmentController::class, 'destroy']);
+
+    Route::put('especialidades/{id}/desactivar', [SpecialtyController::class, 'desactivar']);
+    Route::put('clinicas/{id}/desactivar', [ClinicController::class, 'desactivar']);
+
+    Route::apiResource('especialidades', SpecialtyController::class);
+    Route::apiResource('clinicas', ClinicController::class);
 });

@@ -24,10 +24,10 @@ class AppServiceProvider extends ServiceProvider
     {
         //
         try {
-            $dsn = "sqlsrv:Server=DESKTOP-T26OK4S,1433;Database=DB_MedCore_Global;TrustServerCertificate=true";
-            $pdo = new PDO($dsn, "sa", "Oracle92");
+            $dsn = "sqlsrv:Server=Alexander,1433;Database=DB_MedCore_Global;TrustServerCertificate=true";
+            $pdo = new PDO($dsn, "sa", "middlewareOracle");
             $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            
+
             DB::connection('sqlsrv')->setPdo($pdo);
         } catch (\Exception $e) {
         }

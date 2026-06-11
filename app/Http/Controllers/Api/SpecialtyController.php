@@ -9,7 +9,7 @@ class SpecialtyController extends Controller {
     public function __construct(private SpecialtyRepositoryInterface $repo) {}
 
     public function index() {
-        return response()->json($this->repo->getAllActive());
+        return response()->json($this->repo->getAll());
     }
 
     public function store(Request $request) {

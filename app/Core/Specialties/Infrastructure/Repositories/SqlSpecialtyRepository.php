@@ -10,6 +10,10 @@ class SqlSpecialtyRepository implements SpecialtyRepositoryInterface {
         return DB::select('SELECT EspecialidadID as EspecialidadID, NombreEspecialidad as NombreEspecialidad FROM Especialidades WHERE Estado = 1');
     }
 
+    public function getAll(): array {
+        return DB::select('SELECT EspecialidadID, NombreEspecialidad, Estado FROM Especialidades');
+    }
+
     public function findById(int $id): ?object {
         return DB::table('Especialidades')->where('EspecialidadID', $id)->first();
     }
@@ -29,7 +33,7 @@ class SqlSpecialtyRepository implements SpecialtyRepositoryInterface {
 
     public function delete(int $id): bool {
         return DB::table('Especialidades')
-            ->where('EspecialidadID', $id) 
+            ->where('EspecialidadID', $id)
             ->update(['Estado' => 0]);
     }
 }

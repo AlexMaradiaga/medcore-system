@@ -2,9 +2,10 @@
 namespace App\Core\Specialties\Domain\Ports;
 
 interface SpecialtyRepositoryInterface {
-    public function getAllActive(): array; 
+    public function getAllActive(): array;
+    public function getAll(): array;
     public function findById(int $id): ?object;
     public function store(array $data): bool;
     public function update(int $id, array $data): bool;
-    public function delete(int $id): bool; 
+    public function delete(int $id): bool;
 }

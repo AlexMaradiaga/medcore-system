@@ -61,4 +61,27 @@ class ClinicController extends Controller
             'message' => 'Clínica desactivada'
         ]);
     }
+
+    public function getEntidadesPublicas(): JsonResponse
+    {
+        try {
+            $entidades = \Illuminate\Support\Facades\DB::table('Entidades')
+                ->select(
+                    'EntidadID',
+                    'NombreEntidad as Nombre',
+                    'TipoEntidad',
+                    'Direccion',
+                    'Telefono'
+                )
+                ->where('Estado', 1)
+                ->get();
+
+            return response()->json($entidades, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener instituciones: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

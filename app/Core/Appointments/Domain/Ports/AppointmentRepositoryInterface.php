@@ -12,4 +12,5 @@ interface AppointmentRepositoryInterface
     public function getDoctorAgenda(int $doctorId): array;
     public function getDetailedReport(array $filters): array;
     public function getStats(): array;
+    public function getCatalogoExamenFisico(): array;
 }

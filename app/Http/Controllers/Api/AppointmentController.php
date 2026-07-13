@@ -33,6 +33,9 @@ class AppointmentController extends Controller
                 'numero_poliza' => 'nullable|string|max:50',
                 'nombre_contacto_emergencia' => 'nullable|string|max:100',
                 'telefono_contacto_emergencia' => 'nullable|string|max:20',
+
+                'cronicas_ids' => 'nullable|array',
+                'cronicas_ids.*' => 'integer'
             ]);
 
             $this->repository->create($validated);
@@ -254,6 +257,16 @@ class AppointmentController extends Controller
                 'status' => 'error',
                 'message' => 'Error al obtener examen físico: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    public function getCatalogoExamenFisico(): JsonResponse
+    {
+        try {
+            $catalogo = $this->repository->getCatalogoExamenFisico();
+            return response()->json($catalogo);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 }

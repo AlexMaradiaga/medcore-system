@@ -68,7 +68,6 @@ class HistoryController extends Controller
                 'pin_autorizacion' => 'required|string'
             ]);
 
-            // 1. Validación del PIN (etapa actual de pruebas locales)
             if ($request->pin_autorizacion !== '2026') {
                 return response()->json([
                     'estado' => 'error',
@@ -206,6 +205,7 @@ class HistoryController extends Controller
         }
     }
 
+
     public function obtenerRecetaPorConsulta(Request $request): JsonResponse
     {
         try {
@@ -238,7 +238,7 @@ class HistoryController extends Controller
         }
     }
 
-     public function complete(Request $request): JsonResponse
+    public function complete(Request $request): JsonResponse
     {
         try {
             $validated = $request->validate([
@@ -253,6 +253,9 @@ class HistoryController extends Controller
                 'detalle_medicamentos.*.NombreMedicamento' => 'required|string',
                 'detalle_medicamentos.*.Dosis'             => 'required|string',
                 'detalle_medicamentos.*.Indicaciones'      => 'required|string',
+                'presupuesto_total'            => 'nullable|numeric',
+                'odontograma_json'             => 'nullable|array',
+                'examenes_odontologicos_json'  => 'nullable|array',
             ]);
 
             $this->repository->complete($validated);
@@ -340,7 +343,7 @@ class HistoryController extends Controller
 
                         $diagnosticosFormateados[] = [
                             'codigo'      => $codigoFinal,
-                            'descripcion' => strip_tags($entity['title']), // Limpia los <em>Infección</em>
+                            'descripcion' => strip_tags($entity['title']),
                         ];
                     }
                 }
@@ -359,4 +362,66 @@ class HistoryController extends Controller
             ], 500);
         }
     }
+
+    public function obtenerDetalleParaFacturacion(Request $request)
+    {
+        $citaId = $request->query('cita_id');
+
+        $detalle = DB::select("EXEC sp_ObtenerDetalleFacturacion @CitaID = ?", [$citaId]);
+
+        if (empty($detalle)) {
+            return response()->json(['mensaje' => 'No encontrado'], 404);
+        }
+
+        return response()->json($detalle[0]);
+    }
+
+    public function obtenerMiniDashboardMensual(): JsonResponse
+{
+    try {
+        $doctorId = DB::table('Doctores')->where('UsuarioID', auth()->id())->value('DoctorID');
+        if (!$doctorId) {
+            return response()->json(['estado' => 'error', 'mensaje' => 'Médico no encontrado.'], 403);
+        }
+
+        $primerDiaMes = now()->startOfMonth()->toDateString();
+        $ultimoDiaMes = now()->endOfMonth()->toDateString();
+
+        $citasStats = DB::table('Citas')
+            ->select(
+                DB::raw("COUNT(CitaID) as total_citas"),
+                DB::raw("SUM(CASE WHEN EstadoCita = 'Completada' OR EstadoCita = 'Finalizada' THEN 1 ELSE 0 END) as completadas"),
+                DB::raw("SUM(CASE WHEN EstadoCita = 'Cancelada' THEN 1 ELSE 0 END) as canceladas")
+            )
+            ->where('DoctorID', $doctorId)
+            ->whereBetween('FechaHora', [$primerDiaMes, $ultimoDiaMes . ' 23:59:59'])
+            ->first();
+
+        $odontologiaStats = DB::table('Consultas as c')
+            ->join('Citas as ci', 'c.CitaID', '=', 'ci.CitaID')
+            ->join('Consulta_Odontologia as o', 'c.ConsultaID', '=', 'o.ConsultaID')
+            ->where('ci.DoctorID', $doctorId)
+            ->whereBetween('c.FechaCreacion', [$primerDiaMes, $ultimoDiaMes . ' 23:59:59'])
+            ->select(
+                DB::raw("COALESCE(SUM(o.PresupuestoTotal), 0) as total_presupuestado"),
+                DB::raw("COUNT(o.ConsultaOdontologiaID) as total_tratamientos")
+            )
+            ->first();
+
+        return response()->json([
+            'estado' => 'success',
+            'mes' => now()->locale('es')->format('F Y'),
+            'rendimiento' => [
+                'total_citas' => (int)($citasStats->total_citas ?? 0),
+                'completadas' => (int)($citasStats->completadas ?? 0),
+                'canceladas' => (int)($citasStats->canceladas ?? 0),
+                'total_presupuestado' => (float)($odontologiaStats->total_presupuestado ?? 0),
+                'total_tratamientos' => (int)($odontologiaStats->total_tratamientos ?? 0)
+            ]
+        ]);
+    } catch (\Exception $e) {
+        return response()->json(['estado' => 'error', 'mensaje' => $e->getMessage()], 500);
+    }
+}
+
 }

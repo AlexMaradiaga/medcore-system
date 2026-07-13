@@ -19,15 +19,15 @@ class SqlAuthRepository implements AuthRepositoryInterface
         if (!$record) return null;
 
         return new Usuario(
-            id: $record->UsuarioID,
-            email: $record->Email,
-            passwordHash: $record->PasswordHash,
-            rolId: $record->RolID,
-            entidadId: $record->EntidadID
+            $record->UsuarioID,
+            $record->Email,
+            $record->PasswordHash,
+            $record->RolID,
+            $record->EntidadID
         );
     }
 
-    public function updatePassword(int $usuarioId, string $oldPassword, string $newPassword): bool 
+    public function updatePassword(int $usuarioId, string $oldPassword, string $newPassword): bool
     {
         $usuario = DB::table('Usuarios')->where('UsuarioID', $usuarioId)->first();
 

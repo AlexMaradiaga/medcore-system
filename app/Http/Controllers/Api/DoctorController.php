@@ -91,4 +91,42 @@ class DoctorController extends Controller
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
         }
     }
+
+    public function getByClinic($entidadId): JsonResponse
+    {
+        try {
+            $doctores = \Illuminate\Support\Facades\DB::table('Doctores as D')
+                ->join('Usuarios as U', 'D.UsuarioID', '=', 'U.UsuarioID')
+                ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
+                ->leftJoin('Servicios_Medicos as SM', function($join) {
+                    $join->on('D.DoctorID', '=', 'SM.DoctorID')
+                         ->where('SM.NombreServicio', 'like', '%Consulta%');
+                })
+                ->select(
+                    'D.DoctorID',
+                    'D.Nombre',
+                    'D.Apellido',
+                    'E.NombreEspecialidad as Especialidad',
+                    'U.EntidadID',
+                    'D.RutaFoto as Foto',
+                    'D.EsVerificado',
+                    'D.Estado',
+                    \Illuminate\Support\Facades\DB::raw('ISNULL(MAX(SM.Precio), 90) as CostoConsulta')
+                )
+                ->where('U.EntidadID', $entidadId)
+                ->where('D.Estado', 1)
+                ->groupBy(
+                    'D.DoctorID', 'D.Nombre', 'D.Apellido', 'E.NombreEspecialidad',
+                    'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado'
+                )
+                ->get();
+
+            return response()->json($doctores, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener doctores de la clínica: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

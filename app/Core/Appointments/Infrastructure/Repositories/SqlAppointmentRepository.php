@@ -29,7 +29,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         }
 
         return DB::transaction(function () use ($data) {
-            return DB::statement('EXEC sp_AgendarCita ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?', [
+            DB::statement('EXEC sp_AgendarCita ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?', [
                 $data['UsuarioID'],
                 $data['doctor_id'],
                 $data['entidad_id'],
@@ -46,11 +46,29 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 $data['telefono_contacto_emergencia'],
                 $data['medicamentos_actuales'] ?? null
             ]);
+
+            $cita = DB::table('Citas')
+                ->where('DoctorID', $data['doctor_id'])
+                ->where('FechaHora', $data['fecha_hora'])
+                ->where('Estado', 1)
+                ->orderBy('CitaID', 'desc')
+                ->first();
+
+            if ($cita && isset($data['cronicas_ids']) && is_array($data['cronicas_ids'])) {
+                foreach ($data['cronicas_ids'] as $enfermedadId) {
+                    DB::table('CitasEnfermedades')->insert([
+                        'CitaID'       => (int)$cita->CitaID,
+                        'EnfermedadID' => (int)$enfermedadId
+                    ]);
+                }
+            }
+
+            return true;
         });
     }
 
     public function getPendingByDoctor(int $doctorId): array {
-       return DB::select("EXEC sp_ObtenerCitasDashboardDoctor ?", [$usuarioId]);
+       return DB::select("EXEC sp_ObtenerCitasDashboardDoctor ?", [$doctorId]);
     }
 
     public function getHistoryByPatient(int $usuarioId): array
@@ -142,6 +160,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
 
         return true;
     }
+
     public function getDoctorAgenda(int $doctorId): array
     {
         return DB::table('vw_ReporteCitasLogistica')
@@ -225,6 +244,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
             ORDER BY C.FechaHora DESC
         ", [$usuarioId]);
     }
+
     public function descargarReceta($recetaId)
     {
         $datos = DB::selectOne("
@@ -249,9 +269,8 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         $pdf = Pdf::loadView('pdf.receta', ['receta' => $datos]);
 
         return $pdf->download("Receta_#{$recetaId}.pdf");
-
-
     }
+
     public function getDoctorStats(int $usuarioId): array
     {
         $doctor = DB::table('Doctores')->where('UsuarioID', $usuarioId)->first();
@@ -290,26 +309,45 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 P.Edad,
                 P.Genero,
                 P.Telefono,
-                U_Pac.Email as EmailPaciente,    -- El email viene de Usuarios, no de Pacientes
+                U_Pac.Email as EmailPaciente,
                 C.Alergias,
                 C.MedicamentosActuales,
-                U_Doc.Email as EmailDoctor,     -- Email del doctor desde Usuarios
-                C.EstadoCita
+                U_Doc.Email as EmailDoctor,
+                C.EstadoCita,
+                P.Aseguradora,
+                P.NombreContactoEmergencia,
+                P.TelefonoContactoEmergencia
             FROM Citas C
             INNER JOIN Pacientes P ON C.PacienteID = P.PacienteID
-            INNER JOIN Usuarios U_Pac ON P.UsuarioID = U_Pac.UsuarioID -- Join para email del paciente
+            INNER JOIN Usuarios U_Pac ON P.UsuarioID = U_Pac.UsuarioID
             INNER JOIN Doctores D ON C.DoctorID = D.DoctorID
-            INNER JOIN Usuarios U_Doc ON D.UsuarioID = U_Doc.UsuarioID -- Join para email del doctor
+            INNER JOIN Usuarios U_Doc ON D.UsuarioID = U_Doc.UsuarioID
             WHERE D.UsuarioID = ?
             AND C.EstadoCita IN ('Pendiente', 'Confirmada', 'Completada')
             AND C.Estado = 1
             ORDER BY C.FechaHora ASC
         ", [$usuarioId]);
     }
+
     public function approve(int $citaId): bool
     {
         return DB::table('Citas')
             ->where('CitaID', $citaId)
             ->update(['EstadoCita' => 'Confirmada']);
+    }
+
+    public function getCatalogoExamenFisico(): array
+    {
+        $resultado = DB::select("EXEC sp_ObtenerCatalogoExamenFisico");
+
+        $catalogo = array_map(function($item) {
+            return [
+                'SistemaID' => $item->SistemaID,
+                'NombreSistema' => $item->NombreSistema,
+                'Hallazgos' => json_decode($item->Hallazgos, true) ?? []
+            ];
+        }, $resultado);
+
+        return $catalogo;
     }
 }

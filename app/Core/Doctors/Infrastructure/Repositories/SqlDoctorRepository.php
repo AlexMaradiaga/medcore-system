@@ -4,8 +4,10 @@ namespace App\Core\Doctors\Infrastructure\Repositories;
 use App\Core\Doctors\Domain\Ports\DoctorRepositoryInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Exception;
 
 class SqlDoctorRepository implements DoctorRepositoryInterface {
+
     public function registrar(array $datos): bool {
         $passwordHash = Hash::make($datos['password']);
 
@@ -37,9 +39,9 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
 
     public function update(int $id, array $datos): bool {
         $especialidadExiste = DB::table('Especialidades')
-        ->where('EspecialidadID', $datos['especialidad_id'])
-        ->where('Estado', 1)
-        ->exists();
+            ->where('EspecialidadID', $datos['especialidad_id'])
+            ->where('Estado', 1)
+            ->exists();
 
         $entidadExiste = DB::table('Entidades')
             ->where('EntidadID', $datos['entidad_id'])
@@ -49,6 +51,7 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
         if (!$especialidadExiste || !$entidadExiste) {
             throw new \Exception("La Especialidad o la Clínica seleccionada no son válidas o están inactivas.");
         }
+
         return DB::transaction(function () use ($id, $datos) {
             DB::table('Usuarios')
                 ->join('Doctores', 'Usuarios.UsuarioID', '=', 'Doctores.UsuarioID')
@@ -78,11 +81,14 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
         });
     }
 
-    public function getAllActive(array $filters = []): array {
+    public function getAllActive(array $filters = []): array
+    {
         $query = DB::table('Doctores as D')
             ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
             ->select(
                 'D.DoctorID',
+                'D.UsuarioID',
+                'D.EspecialidadID',
                 'D.Nombre',
                 'D.Apellido',
                 'E.NombreEspecialidad as Especialidad',
@@ -105,8 +111,8 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
 
         return $query->get()->toArray();
     }
-    public function getFullHistory(int $pacienteId, int $doctorId): array
-    {
+
+    public function getFullHistory(int $pacienteId, int $doctorId): array {
         $results = DB::select("EXEC sp_ObtenerHistorialClinico ?, ?", [$pacienteId, $doctorId]);
 
         return [
@@ -137,11 +143,10 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             ->toArray();
     }
 
-    public function complete(array $data): bool
-    {
+    public function complete(array $data): bool {
         $data = json_decode(json_encode($data), true);
 
-        $cita = \DB::table('Citas')->where('CitaID', $data['cita_id'])->first();
+        $cita = DB::table('Citas')->where('CitaID', $data['cita_id'])->first();
         if (!$cita) {
             throw new \Exception("La cita ID: {$data['cita_id']} no existe.");
         }
@@ -149,9 +154,13 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             throw new \Exception("La cita debe estar 'Confirmada' para finalizarla. Estado actual: {$cita->EstadoCita}");
         }
 
+        if (isset($data['presupuesto_total'])) {
+            $data['presupuesto_total'] = (float)$data['presupuesto_total'];
+        }
+
         $payloadJsonStr = json_encode($data);
 
-        \DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
+        DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
             $data['cita_id'],
             $data['diagnostico'],
             $data['notas_medicas'] ?? null,

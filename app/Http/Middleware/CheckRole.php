@@ -9,20 +9,37 @@ use Symfony\Component\HttpFoundation\Response;
 class CheckRole
 {
     /**
-     * Handle an incoming request.
+     * Verifica que el usuario autenticado posea el rol requerido.
      *
-     * @param  Closure(Request): (Response)  $next
+     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
     public function handle(Request $request, Closure $next, string $role): Response
     {
-        if (!$request->user()) {
-            return response()->json(['message' => 'No autenticado.'], 401);
-        }
+        $user = $request->user();
 
-        if ($request->user()->rol->NombreRol !== $role) {
+        // Verificar autenticación
+        if (!$user) {
             return response()->json([
                 'status' => 'error',
-                'message' => "Acceso denegado. Se requiere el rol: {$role}"
+                'message' => 'No autenticado.'
+            ], 401);
+        }
+
+        // Verificar que el usuario tenga un rol asignado
+        $userRole = $user->rol?->NombreRol;
+
+        if (!$userRole) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'El usuario no tiene un rol asignado.'
+            ], 403);
+        }
+
+        // Verificar que el rol coincida
+        if ($userRole !== $role) {
+            return response()->json([
+                'status' => 'error',
+                'message' => "Acceso denegado. Se requiere el rol: {$role}."
             ], 403);
         }
 

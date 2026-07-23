@@ -104,6 +104,8 @@ return [
             explode(',', (string) env('APP_PREVIOUS_KEYS', ''))
         ),
     ],
+    // Clave utilizada por CryptoMiddleware
+    'encryption_key' => env('APP_ENCRYPTION_KEY'),
 
     /*
     |--------------------------------------------------------------------------

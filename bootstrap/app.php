@@ -12,11 +12,18 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->alias([
-        'role' => \App\Http\Middleware\CheckRole::class,
-        'limite.saas' => \App\Http\Middleware\ValidarLimitePlanSaaS::class,
-        ]);
+
         $middleware->statefulApi();
+
+        $middleware->appendToGroup('api', [
+            \App\Http\Middleware\CryptoMiddleware::class,
+        ]);
+
+        $middleware->alias([
+            'role' => \App\Http\Middleware\CheckRole::class,
+            'limite.saas' => \App\Http\Middleware\ValidarLimitePlanSaaS::class,
+        ]);
+
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //

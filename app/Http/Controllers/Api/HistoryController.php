@@ -248,7 +248,6 @@ class HistoryController extends Controller
                 'signos_vitales'               => 'required|array',
                 'examen_fisico_opciones'       => 'required|array',
                 'examen_fisico_notas'          => 'nullable|array',
-
                 'detalle_medicamentos'         => 'required|array',
                 'detalle_medicamentos.*.NombreMedicamento' => 'required|string',
                 'detalle_medicamentos.*.Dosis'             => 'required|string',
@@ -256,17 +255,44 @@ class HistoryController extends Controller
                 'presupuesto_total'            => 'nullable|numeric',
                 'odontograma_json'             => 'nullable|array',
                 'examenes_odontologicos_json'  => 'nullable|array',
+                'crear_seguimiento'            => 'nullable|boolean',
+                'seguimiento_fecha_hora'       => 'nullable|string'
             ]);
 
+            DB::beginTransaction();
+
             $this->repository->complete($validated);
+
+            if ($request->input('crear_seguimiento') === true && $request->filled('seguimiento_fecha_hora')) {
+                $citaOrigen = DB::table('Citas')->where('CitaID', $validated['cita_id'])->first();
+
+                if ($citaOrigen) {
+                    DB::table('Citas')->insert([
+                        'PacienteID'           => $citaOrigen->PacienteID,
+                        'DoctorID'             => $citaOrigen->DoctorID,
+                        'EntidadID'            => $citaOrigen->EntidadID,
+                        'FechaHora'            => $request->input('seguimiento_fecha_hora'),
+                        'Motivo'               => 'Cita de revisión programada post-consulta #' . $validated['cita_id'],
+                        'EstadoCita'           => 'Confirmada',
+                        'Estado'               => 1,
+                        'Sintomas'             => 'Seguimiento clínico automatizado.',
+                        'Alergias'             => $citaOrigen->Alergias ?? null,
+                        'MedicamentosActuales' => $citaOrigen->MedicamentosActuales ?? null
+                    ]);
+                }
+            }
+
+            DB::commit();
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Consulta finalizada y receta generada con éxito'
             ]);
         } catch (\Illuminate\Validation\ValidationException $ve) {
+            DB::rollBack();
             return response()->json(['status' => 'error', 'errors' => $ve->errors()], 422);
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json([
                 'status' => 'error',
                 'message' => 'Error Nativo de BD: ' . $e->getMessage()

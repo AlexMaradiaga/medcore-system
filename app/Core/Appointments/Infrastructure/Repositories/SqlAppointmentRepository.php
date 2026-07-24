@@ -144,7 +144,14 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         if (!$cita) {
             throw new \Exception("La cita ID: {$data['cita_id']} no existe.");
         }
-        if ($cita->EstadoCita !== 'Confirmada') {
+
+        if ($cita->EstadoCita === 'Completada') {
+            \Log::warning('La cita ID ' . $data['cita_id'] . ' ya había sido completada previamente. Omitiendo re-ejecución.');
+            return true;
+        }
+
+        $estadosPermitidos = ['Confirmada', 'confirmada', 'CONFIRMADA'];
+        if (!in_array($cita->EstadoCita, $estadosPermitidos)) {
             throw new \Exception("La cita debe estar 'Confirmada' para finalizarla. Estado actual: {$cita->EstadoCita}");
         }
 
@@ -160,6 +167,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
 
         return true;
     }
+
 
     public function getDoctorAgenda(int $doctorId): array
     {

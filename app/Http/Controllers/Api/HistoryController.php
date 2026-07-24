@@ -263,22 +263,32 @@ class HistoryController extends Controller
 
             $this->repository->complete($validated);
 
-            if ($request->input('crear_seguimiento') === true && $request->filled('seguimiento_fecha_hora')) {
-                $citaOrigen = DB::table('Citas')->where('CitaID', $validated['cita_id'])->first();
+            $crearSeguimiento = filter_var($request->input('crear_seguimiento'), FILTER_VALIDATE_BOOLEAN);
 
-                if ($citaOrigen) {
-                    DB::table('Citas')->insert([
-                        'PacienteID'           => $citaOrigen->PacienteID,
-                        'DoctorID'             => $citaOrigen->DoctorID,
-                        'EntidadID'            => $citaOrigen->EntidadID,
-                        'FechaHora'            => $request->input('seguimiento_fecha_hora'),
-                        'Motivo'               => 'Cita de revisión programada post-consulta #' . $validated['cita_id'],
-                        'EstadoCita'           => 'Confirmada',
-                        'Estado'               => 1,
-                        'Sintomas'             => 'Seguimiento clínico automatizado.',
-                        'Alergias'             => $citaOrigen->Alergias ?? null,
-                        'MedicamentosActuales' => $citaOrigen->MedicamentosActuales ?? null
-                    ]);
+            if ($crearSeguimiento && $request->filled('seguimiento_fecha_hora')) {
+                $motivoSeguimiento = 'Cita de revisión programada post-consulta #' . $validated['cita_id'];
+
+                $existeSeguimiento = DB::table('Citas')
+                    ->where('Motivo', $motivoSeguimiento)
+                    ->exists();
+
+                if (!$existeSeguimiento) {
+                    $citaOrigen = DB::table('Citas')->where('CitaID', $validated['cita_id'])->first();
+
+                    if ($citaOrigen) {
+                        DB::table('Citas')->insert([
+                            'PacienteID'           => $citaOrigen->PacienteID,
+                            'DoctorID'             => $citaOrigen->DoctorID,
+                            'EntidadID'            => $citaOrigen->EntidadID,
+                            'FechaHora'            => $request->input('seguimiento_fecha_hora'),
+                            'Motivo'               => $motivoSeguimiento,
+                            'EstadoCita'           => 'Confirmada',
+                            'Estado'               => 1,
+                            'Sintomas'             => 'Seguimiento clínico automatizado.',
+                            'Alergias'             => $citaOrigen->Alergias ?? null,
+                            'MedicamentosActuales' => $citaOrigen->MedicamentosActuales ?? null
+                        ]);
+                    }
                 }
             }
 
@@ -288,6 +298,7 @@ class HistoryController extends Controller
                 'status' => 'success',
                 'message' => 'Consulta finalizada y receta generada con éxito'
             ]);
+
         } catch (\Illuminate\Validation\ValidationException $ve) {
             DB::rollBack();
             return response()->json(['status' => 'error', 'errors' => $ve->errors()], 422);

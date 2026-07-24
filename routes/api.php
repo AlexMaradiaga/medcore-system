@@ -29,6 +29,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('logout', [AuthController::class, 'logout']);
     Route::put('/auth/password', [AuthController::class, 'changePassword']);
 
+    //Actualizar Plan SaaS
+    Route::post('saas/actualizar-plan', [SaaSController::class, 'actualizarPlanMembresia']);
+
     // --- ROL: SOLO ADMINISTRADORES ---
     Route::middleware('role:Admin')->group(function () {
         Route::get('admin/usuarios', [AdminController::class, 'obtenerUsuarios']);

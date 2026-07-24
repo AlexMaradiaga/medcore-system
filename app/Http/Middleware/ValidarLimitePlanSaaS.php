@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
+use Carbon\Carbon;
 
 class ValidarLimitePlanSaaS
 {
@@ -17,10 +18,12 @@ class ValidarLimitePlanSaaS
 
     /**
      * Límites por plan.
-     * En el futuro puedes mover esto a config/saas.php
      */
     private const PLAN_LIMITS = [
         'Gratis' => [
+            'pacientes' => 10,
+        ],
+        'Basico' => [
             'pacientes' => 10,
         ],
     ];
@@ -39,32 +42,37 @@ class ValidarLimitePlanSaaS
             ], 401);
         }
 
+        // Obtener el ID del usuario soportando ambas convenciones (UsuarioID o id)
+        $userId = $user->UsuarioID ?? $user->id;
+
         /*
         |--------------------------------------------------------------------------
-        | Obtener la suscripción desde caché
+        | Obtener la suscripción desde caché usando UsuarioID
         |--------------------------------------------------------------------------
         */
-
         $suscripcion = Cache::remember(
-            "suscripcion_usuario_{$user->UsuarioID}",
+            "suscripcion_usuario_{$userId}",
             now()->addMinutes(self::CACHE_MINUTES),
-            function () use ($user) {
+            function () use ($userId) {
                 return DB::table('Sistema_Suscripciones_SaaS')
-                    ->where('UsuarioID', $user->UsuarioID)
+                    ->where('UsuarioID', $userId)
                     ->first();
             }
         );
 
-        $plan = $suscripcion?->TipoPlan ?? 'Gratis';
-        $estado = $suscripcion?->EstadoSuscripcion ?? 'Activo';
+        // Mapeo flexible de Plan (soporta PlanAsignado o TipoPlan)
+        $plan = $suscripcion?->PlanAsignado ?? $suscripcion?->TipoPlan ?? 'Gratis';
+
+        // Mapeo flexible de Estado (soporta EstadoSaaS como int/string o EstadoSuscripcion)
+        $estadoRaw = $suscripcion?->EstadoSaaS ?? $suscripcion?->EstadoSuscripcion ?? 'Activo';
+        $esActivo = ($estadoRaw == 1 || strtolower((string)$estadoRaw) === 'activo');
 
         /*
         |--------------------------------------------------------------------------
         | Validar estado de la suscripción
         |--------------------------------------------------------------------------
         */
-
-        if ($estado !== 'Activo') {
+        if (!$esActivo) {
             return response()->json([
                 'status' => 'subscription_expired',
                 'message' => 'La suscripción de MedCore Global se encuentra vencida o suspendida.'
@@ -76,7 +84,6 @@ class ValidarLimitePlanSaaS
         | Validar si el plan tiene límite para este recurso
         |--------------------------------------------------------------------------
         */
-
         $limit = self::PLAN_LIMITS[$plan][$recurso] ?? null;
 
         if ($limit === null) {
@@ -85,22 +92,30 @@ class ValidarLimitePlanSaaS
 
         /*
         |--------------------------------------------------------------------------
-        | Pacientes
+        | Pacientes (Validación por DoctorID asociado al Usuario logueado)
         |--------------------------------------------------------------------------
         */
-
         if ($recurso === 'pacientes') {
+            // Obtenemos el DoctorID correcto a partir del UsuarioID autenticado
+            $doctorId = DB::table('Doctores')->where('UsuarioID', $userId)->value('DoctorID');
 
-            $cantidad = DB::table('Pacientes')
-                ->where('EntidadID', $user->EntidadID)
-                ->where('Estado', 1)
-                ->count();
+            if (!$doctorId) {
+                return $next($request); // Si no es doctor, dejamos pasar
+            }
+
+            $fechaLimite = Carbon::now()->subDays(90);
+
+            $cantidad = DB::table('Citas')
+                ->where('DoctorID', $doctorId)
+                ->where('FechaHora', '>=', $fechaLimite)
+                ->whereIn('EstadoCita', ['Completada', 'Finalizada'])
+                ->distinct('PacienteID')
+                ->count('PacienteID');
 
             if ($cantidad >= $limit) {
-
                 return response()->json([
                     'status' => 'limit_reached',
-                    'message' => "Ha alcanzado el límite de {$limit} pacientes permitido por su plan {$plan}."
+                    'message' => "Ha alcanzado el límite de {$limit} pacientes activos (en los últimos 90 días) permitido por su plan {$plan}."
                 ], 403);
             }
         }

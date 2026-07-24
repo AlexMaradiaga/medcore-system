@@ -50,6 +50,7 @@ class AuthController extends Controller
                 throw new \Exception("El rol 'Doctor' no está configurado en la tabla Roles de la base de datos.");
             }
 
+            $doctor = null;
             if ($usuario->rolId == $rolDoctorId) {
                 $doctor = DB::table('Doctores')->where('UsuarioID', $usuario->id)->first();
                 if ($doctor && $doctor->EsVerificado == 0) {
@@ -65,20 +66,43 @@ class AuthController extends Controller
                 $entidad = DB::table('Entidades')->where('EntidadID', $userModel->EntidadID)->first();
             }
 
+            // ==========================================
+            // CONSULTAR SUSCRIPCIÓN SAAS (Usuario / Entidad)
+            // ==========================================
+            $suscripcion = DB::table('Sistema_Suscripciones_SaaS')
+                ->where('UsuarioID', $usuario->id)
+                ->when($userModel->EntidadID, function ($query) use ($userModel) {
+                    return $query->orWhere('EntidadID', $userModel->EntidadID);
+                })
+                ->first();
+
+            // 1. Obtener el plan directo de la suscripción
+            $plan = $suscripcion->PlanAsignado ?? $suscripcion->TipoPlan ?? null;
+
+            // 2. Fallback inteligente: si no hay registro directo en la tabla SaaS,
+            // pero es una Entidad (Clínica/Farmacia/Laboratorio) o un Doctor ya Verificado, asigna 'Ejecutivo'
+            if (!$plan) {
+                $plan = ($entidad || ($doctor && $doctor->EsVerificado == 1)) ? 'Ejecutivo' : 'Gratis';
+            }
+
+            $estadoSaaS = $suscripcion->EstadoSaaS ?? 1;
+
             $token = $userModel->createToken('auth_token')->plainTextToken;
 
             return response()->json([
                 'success' => true,
                 'status' => 'success',
                 'data' => [
-                    'id' => $usuario->id,
-                    'email' => $usuario->email,
-                    'rol_id' => $usuario->rolId,
-                    'entidad_id' => $userModel->EntidadID,
-                    'tipo_entidad' => $entidad ? $entidad->TipoEntidad : null
+                    'id'           => $usuario->id,
+                    'email'        => $usuario->email,
+                    'rol_id'       => $usuario->rolId,
+                    'entidad_id'   => $userModel->EntidadID,
+                    'tipo_entidad' => $entidad ? $entidad->TipoEntidad : null,
+                    'plan'         => $plan,        // <-- Garantiza retornar un plan activo ('Ejecutivo', 'Pro', etc.)
+                    'estado_saas'  => $estadoSaaS
                 ],
                 'access_token' => $token,
-                'token_type' => 'Bearer'
+                'token_type'   => 'Bearer'
             ]);
         } catch (\Exception $e) {
             return response()->json([

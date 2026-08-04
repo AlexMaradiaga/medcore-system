@@ -1,10 +1,12 @@
 <?php
+
 namespace App\Core\SaaS\Infrastructure\Repositories;
 
 use App\Core\SaaS\Domain\Ports\SaaSRepositoryInterface;
+use App\Events\SaaS\PaymentReceived;
+use App\Events\SaaS\PlanActivated;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
-use Exception;
 use PDO;
 
 class SqlSaaSRepository implements SaaSRepositoryInterface
@@ -24,28 +26,51 @@ class SqlSaaSRepository implements SaaSRepositoryInterface
         $planId = $planMap[$tipoPlan] ?? 2;
         $monto  = $planId === 3 ? 299.00 : ($planId === 2 ? 99.00 : 0.00);
 
-        // 3. Ejecución directa sin catch silencioso para que el controlador reciba la excepción si falla
-        return DB::statement("EXEC sp_ProcesarPago
-            @UsuarioID = ?,
-            @EntidadID = ?,
-            @ReferenciaID = ?,
-            @TipoConcepto = ?,
-            @MontoTotal = ?,
-            @MetodoPago = ?,
-            @ReferenciaPasarela = ?,
-            @EstadoPago = ?,
-            @PlanID = ?",
-        [
-            $usuarioId,
-            $entidadId,
-            $planId,                 // ReferenciaID
-            'SuscripcionSaaS',      // TipoConcepto
-            $monto,                  // MontoTotal
-            'card',                  // MetodoPago
-            $tokenPasarela,          // ReferenciaPasarela
-            'PROCESADO',             // EstadoPago
-            $planId                  // PlanID
-        ]);
+        // 3. Ejecución dentro de una transacción para asegurar consistencia con los eventos de auditoría
+        return DB::transaction(function () use ($usuarioId, $entidadId, $planId, $tipoPlan, $diasVigencia, $monto, $tokenPasarela) {
+            $resultado = DB::statement("EXEC sp_ProcesarPago
+                @UsuarioID = ?,
+                @EntidadID = ?,
+                @ReferenciaID = ?,
+                @TipoConcepto = ?,
+                @MontoTotal = ?,
+                @MetodoPago = ?,
+                @ReferenciaPasarela = ?,
+                @EstadoPago = ?,
+                @PlanID = ?",
+            [
+                $usuarioId,
+                $entidadId,
+                $planId,                 // ReferenciaID
+                'SuscripcionSaaS',      // TipoConcepto
+                $monto,                  // MontoTotal
+                'card',                  // MetodoPago
+                $tokenPasarela,          // ReferenciaPasarela
+                'PROCESADO',             // EstadoPago
+                $planId                  // PlanID
+            ]);
+
+            if ($resultado) {
+                // Despachar evento de pago recibido para trazabilidad auditada
+                PaymentReceived::dispatch(
+                    $usuarioId,
+                    $entidadId,
+                    $monto,
+                    $tokenPasarela,
+                    'Pasarela_Tarjetas'
+                );
+
+                // Despachar evento de activación de plan
+                PlanActivated::dispatch(
+                    $usuarioId,
+                    $entidadId,
+                    $tipoPlan,
+                    $diasVigencia
+                );
+            }
+
+            return $resultado;
+        });
     }
 
     public function obtenerMonitoreo(): array

@@ -34,7 +34,9 @@ class SqlPatientRepository implements PatientRepositoryInterface {
             $datos['parentesco'] ?? null,
             $datos['tutor_nombre'] ?? null,
             $datos['tutor_telefono'] ?? null,
-            $datos['documento_identidad_url'] ?? null
+            $datos['documento_identidad_url'] ?? null,
+            $datos['nacionalidad'] ?? 'Hondureña',
+            $datos['tipo_sangre'] ?? null
         ]);
     }
 
@@ -43,6 +45,7 @@ class SqlPatientRepository implements PatientRepositoryInterface {
         return DB::select('
             SELECT
                 p.PacienteID, p.UsuarioID, p.DNI, p.Nombre, p.Apellido, p.Telefono,
+                p.Nacionalidad, p.TipoSangre,
                 p.Estado, u.Email, p.Edad, p.Genero,
                 p.Aseguradora, p.NumeroPoliza,
                 p.NombreContactoEmergencia, p.TelefonoContactoEmergencia,
@@ -81,6 +84,8 @@ class SqlPatientRepository implements PatientRepositoryInterface {
                     'Nombre'         => $datos['nombre'],
                     'Apellido'       => $datos['apellido'],
                     'Telefono'       => $datos['telefono'],
+                    'Nacionalidad'   => $datos['nacionalidad'] ?? $paciente->Nacionalidad,
+                    'TipoSangre'     => $datos['tipo_sangre'] ?? $paciente->TipoSangre,
                     'es_dependiente' => $datos['es_dependiente'] ?? $paciente->es_dependiente,
                     'tutor_dni'      => $datos['tutor_dni'] ?? $paciente->tutor_dni,
                     'parentesco'     => $datos['parentesco'] ?? $paciente->parentesco
@@ -92,20 +97,59 @@ class SqlPatientRepository implements PatientRepositoryInterface {
         return DB::table('Pacientes')->where('PacienteID', $id)->update(['Estado' => 0]);
     }
 
-    public function obtenerPorUsuarioId($usuarioId)
+    public function obtenerPorUsuarioId(int $usuarioId): ?object
     {
-        $paciente = DB::table('Pacientes')
-            ->where('UsuarioID', $usuarioId)
+        return DB::table('Pacientes')
+            ->where(function ($query) use ($usuarioId) {
+                $query->where('UsuarioID', $usuarioId)
+                    ->orWhere('PacienteID', $usuarioId);
+            })
             ->where('Estado', 1)
+            ->select([
+                'PacienteID as id',
+                'UsuarioID as usuario_id',
+                'Nombre as nombre',
+                'Apellido as apellido',
+                'DNI as dni',
+                'Telefono as telefono',
+                'Edad as fecha_nacimiento',
+                'Genero as genero',
+                'TipoSangre as tipo_sangre',
+                'Aseguradora as aseguradora',
+                'NumeroPoliza as poliza',
+                'NombreContactoEmergencia as nombre_contacto_emergencia',
+                'TelefonoContactoEmergencia as telefono_contacto_emergencia',
+                'es_dependiente',
+                'TutorID as tutor_id',
+                'Parentesco as parentesco'
+            ])
             ->first();
+    }
 
-        if (!$paciente) {
-            return response()->json(['message' => 'Perfil clínico no encontrado'], 404);
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'data' => $paciente
-        ], 200);
+    public function obtenerDependientesPorTutorId(int $tutorId): array
+    {
+        return DB::table('Pacientes')
+            ->where('TutorID', $tutorId)
+            ->where('Estado', 1)
+            ->select([
+                'PacienteID as id',
+                'UsuarioID as usuario_id',
+                'Nombre as nombre',
+                'Apellido as apellido',
+                'DNI as dni',
+                'Telefono as telefono',
+                'Edad as fecha_nacimiento',
+                'Genero as genero',
+                'TipoSangre as tipo_sangre',
+                'Aseguradora as aseguradora',
+                'NumeroPoliza as poliza',
+                'NombreContactoEmergencia as nombre_contacto_emergencia',
+                'TelefonoContactoEmergencia as telefono_contacto_emergencia',
+                'es_dependiente',
+                'TutorID as tutor_id', // 👈 Se reemplaza 'tutor_dni' por 'TutorID as tutor_id'
+                'Parentesco as parentesco'
+            ])
+            ->get()
+            ->toArray();
     }
 }

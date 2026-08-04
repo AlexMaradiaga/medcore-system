@@ -13,21 +13,25 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
+
     protected $table = 'Usuarios';
     protected $primaryKey = 'UsuarioID';
     public $timestamps = false;
-
 
     public function getAuthPassword()
     {
         return $this->PasswordHash;
     }
+
     protected $fillable = [
         'Email',
         'PasswordHash',
         'EntidadID',
         'RolID',
-        'Estado'
+        'Estado',
+        'EsFounder',
+        'NivelFounder',
+        'FechaFounder',
     ];
 
     /**
@@ -48,7 +52,9 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            'password'          => 'hashed',
+            'EsFounder'         => 'boolean',
+            'FechaFounder'      => 'datetime',
         ];
     }
 

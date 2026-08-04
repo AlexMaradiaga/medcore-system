@@ -66,9 +66,6 @@ class AuthController extends Controller
                 $entidad = DB::table('Entidades')->where('EntidadID', $userModel->EntidadID)->first();
             }
 
-            // ==========================================
-            // CONSULTAR SUSCRIPCIÓN SAAS (Usuario / Entidad)
-            // ==========================================
             $suscripcion = DB::table('Sistema_Suscripciones_SaaS')
                 ->where('UsuarioID', $usuario->id)
                 ->when($userModel->EntidadID, function ($query) use ($userModel) {
@@ -76,11 +73,8 @@ class AuthController extends Controller
                 })
                 ->first();
 
-            // 1. Obtener el plan directo de la suscripción
             $plan = $suscripcion->PlanAsignado ?? $suscripcion->TipoPlan ?? null;
 
-            // 2. Fallback inteligente: si no hay registro directo en la tabla SaaS,
-            // pero es una Entidad (Clínica/Farmacia/Laboratorio) o un Doctor ya Verificado, asigna 'Ejecutivo'
             if (!$plan) {
                 $plan = ($entidad || ($doctor && $doctor->EsVerificado == 1)) ? 'Ejecutivo' : 'Gratis';
             }
@@ -98,7 +92,7 @@ class AuthController extends Controller
                     'rol_id'       => $usuario->rolId,
                     'entidad_id'   => $userModel->EntidadID,
                     'tipo_entidad' => $entidad ? $entidad->TipoEntidad : null,
-                    'plan'         => $plan,        // <-- Garantiza retornar un plan activo ('Ejecutivo', 'Pro', etc.)
+                    'plan'         => $plan,
                     'estado_saas'  => $estadoSaaS
                 ],
                 'access_token' => $token,
@@ -122,6 +116,14 @@ class AuthController extends Controller
                 'apellido'            => 'required|string|max:100',
                 'especialidad_id'     => 'required|integer',
                 'numero_colegiado'    => 'required|string|unique:Doctores,NumeroColegiado',
+
+                'nacionalidad'          => 'nullable|string|max:50',
+                'habla_ingles'          => 'nullable|boolean',
+                'otros_idiomas'         => 'nullable|string|max:255',
+                'disponible_domicilio'  => 'nullable|boolean',
+                'latitud'               => 'nullable|numeric',
+                'longitud'              => 'nullable|numeric',
+                'direccion_consultorio' => 'nullable|string|max:255',
 
                 'fotografia'          => 'required|file|image|mimes:jpg,jpeg,png|max:2048',
                 'titulo_medico'       => 'required|file|mimes:pdf,jpg,png|max:3072',
@@ -153,9 +155,10 @@ class AuthController extends Controller
                 INSERT INTO Doctores (
                     UsuarioID, EspecialidadID, Nombre, Apellido, NumeroColegiado,
                     RutaFoto, RutaTituloMedico, RutaTituloEspecialista, RutaConstanciaColegio, RutaDni,
+                    Nacionalidad, HablaIngles, OtrosIdiomas, DisponibleDomicilio, Latitud, Longitud, DireccionConsultorio,
                     EsVerificado, Estado
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
             ", [
                 $usuarioCreado->UsuarioID,
                 $validated['especialidad_id'],
@@ -166,7 +169,14 @@ class AuthController extends Controller
                 $pathTituloMed,
                 $pathTituloEsp,
                 $pathConstancia,
-                $pathDni
+                $pathDni,
+                $validated['nacionalidad'] ?? 'Hondureña',
+                $hablaIngles,
+                $validated['otros_idiomas'] ?? null,
+                $disponibleDomicilio,
+                $validated['latitud'] ?? null,
+                $validated['longitud'] ?? null,
+                $validated['direccion_consultorio'] ?? null
             ]);
 
             DB::commit();

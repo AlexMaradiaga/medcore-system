@@ -15,7 +15,8 @@ use App\Http\Controllers\Api\{
     SaaSController,
     LaboratoryController,
     ClinicDashboardController,
-    LaboratoryDashboardController
+    LaboratoryDashboardController,
+    PharmacyController
 };
 
 // RUTAS PÚBLICAS
@@ -28,9 +29,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('logout', [AuthController::class, 'logout']);
     Route::put('/auth/password', [AuthController::class, 'changePassword']);
+    Route::get('/system/settings', [SystemSettingController::class, 'index']);
+    Route::post('/system/settings', [SystemSettingController::class, 'updateSetting']);
 
     //Actualizar Plan SaaS
     Route::post('saas/actualizar-plan', [SaaSController::class, 'actualizarPlanMembresia']);
+    // Estado e Indicadores de Límites SaaS / Founder
+    Route::get('saas/estado', [SaaSController::class, 'obtenerEstadoSaaS']);
 
     // --- ROL: SOLO ADMINISTRADORES ---
     Route::middleware('role:Admin')->group(function () {
@@ -109,6 +114,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/pacientes/auto-registro', [PatientController::class, 'autoRegistroTutor']);
     });
 
+    // RUTAS DE FARMACIA (MÓDULO OPERATIVO & MONETIZACIÓN)
+    Route::prefix('farmacia')->group(function () {
+        Route::get('recetas/buscar', [PharmacyController::class, 'buscarReceta']);
+        Route::put('recetas/{id}/estado', [PharmacyController::class, 'cambiarEstado']);
+        Route::post('recetas/{id}/surtir', [PharmacyController::class, 'surtir']);
+    });
+
     // --- ACCESO COMPARTIDO MUTUO ---
     Route::apiResource('especialidades', SpecialtyController::class);
     Route::get('doctores', [DoctorController::class, 'index']);
@@ -144,6 +156,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('catalogo', [LaboratoryController::class, 'catalogo']);
         Route::get('paciente/{pacienteId}/ordenes', [LaboratoryController::class, 'ordenesPaciente']);
         Route::get('orden/{ordenId}/resultados', [LaboratoryController::class, 'resultadosOrden']);
+        Route::get('/ordenes', [LaboratoryController::class, 'obtenerOrdenes']);
+        Route::put('/ordenes/{id}/aceptar', [LaboratoryController::class, 'aceptarOrden']);
+        Route::post('/ordenes/escanear-qr', [LaboratoryController::class, 'validarQR']);
+        Route::post('/ordenes/{id}/subir-resultados', [LaboratoryController::class, 'subirResultadosPDF']);
     });
 
     // 1. Ruta para obtener todas las instituciones/clínicas

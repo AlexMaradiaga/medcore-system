@@ -35,6 +35,9 @@ class PatientController extends Controller
                 'entidad_id'               => 'required|integer',
                 'es_dependiente'           => 'nullable',
 
+                'nacionalidad'             => 'nullable|string|max:50',
+                'tipo_sangre'              => 'nullable|string|max:10',
+
                 'email'                    => $esDependiente ? 'nullable|email' : 'required|email',
                 'password'                 => $esDependiente ? 'nullable|string|min:6' : 'required|string|min:6',
 
@@ -81,7 +84,9 @@ class PatientController extends Controller
                 'nombre'     => 'required|string',
                 'apellido'   => 'required|string',
                 'telefono'   => 'required|string',
-                'entidad_id' => 'required|integer'
+                'entidad_id' => 'required|integer',
+                'nacionalidad' => 'nullable|string|max:50',
+                'tipo_sangre'  => 'nullable|string|max:10'
             ]);
 
             $this->repository->update((int)$id, $validated);
@@ -115,50 +120,88 @@ class PatientController extends Controller
     }
     public function obtenerPorUsuario($usuarioId)
     {
+        // Consultamos directamente el paciente por su UsuarioID
         $paciente = DB::table('Pacientes')
             ->where('UsuarioID', $usuarioId)
+            ->where('Estado', 1)
+            ->select([
+                'PacienteID as id',
+                'UsuarioID as usuario_id',
+                'Nombre as nombre',
+                'Apellido as apellido',
+                'DNI as dni',
+                'Telefono as telefono',
+                'Edad as fecha_nacimiento',
+                'Genero as genero',
+                'TipoSangre as tipo_sangre',
+                'Aseguradora as aseguradora',
+                'NumeroPoliza as poliza',
+                'NombreContactoEmergencia as nombre_contacto_emergencia',
+                'TelefonoContactoEmergencia as telefono_contacto_emergencia',
+                'es_dependiente',
+                'TutorID as tutor_id',
+                'parentesco',
+                'tutor_dni',
+                'tutor_nombre',
+                'tutor_telefono',
+                'tutor_email'
+            ])
             ->first();
 
-        $usuario = DB::table('Usuarios')->where('UsuarioID', $usuarioId)->first();
-        $dependientes = collect();
-        $tutor = null;
-
-        if ($usuario) {
-            $emailUsuario = $usuario->Email ?? $usuario->email ?? '';
-
-            $tutor = DB::table('Tutores')->where('Email', $emailUsuario)->first();
-            if ($tutor) {
-                $dependientes = DB::table('Pacientes')->where('TutorID', $tutor->TutorID)->get();
-            }
-        }
-
         if ($paciente) {
+            $dependientes = $this->repository->obtenerDependientesPorTutorId((int)$paciente->id);
+
             return response()->json([
-                'status' => 'success',
-                'es_tutor' => $dependientes->isNotEmpty(),
-                'necesita_perfil_tutor' => false,
-                'data' => $paciente,
-                'todos_los_dependientes' => $dependientes->isNotEmpty()
-                    ? array_merge([$paciente], $dependientes->toArray())
-                    : [$paciente]
-            ]);
+                'status'       => 'success',
+                'es_tutor'     => count($dependientes) > 0,
+                'data'         => $paciente,
+                'dependientes' => $dependientes
+            ], 200);
         }
 
-        if ($dependientes->isNotEmpty()) {
+        $dependienteDirecto = DB::table('Pacientes as P')
+            ->leftJoin('Pacientes as T', 'P.TutorID', '=', 'T.PacienteID')
+            ->where('P.TutorID', $usuarioId)
+            ->orWhere('P.PacienteID', $usuarioId)
+            ->where('P.Estado', 1)
+            ->select([
+                'P.PacienteID as id',
+                'P.UsuarioID as usuario_id',
+                'P.Nombre as nombre',
+                'P.Apellido as apellido',
+                'P.DNI as dni',
+                'P.Telefono as telefono',
+                'P.Edad as fecha_nacimiento',
+                'P.Genero as genero',
+                'P.TipoSangre as tipo_sangre',
+                'P.Aseguradora as aseguradora',
+                'P.NumeroPoliza as poliza',
+                'P.NombreContactoEmergencia as nombre_contacto_emergencia',
+                'P.TelefonoContactoEmergencia as telefono_contacto_emergencia',
+                'P.es_dependiente',
+                'P.TutorID as tutor_id',
+                'P.parentesco',
+                'T.Nombre as tutor_nombre',
+                'T.DNI as tutor_dni',
+                'T.Telefono as tutor_telefono'
+            ])
+            ->first();
+
+        if ($dependienteDirecto) {
             return response()->json([
-                'status' => 'success',
-                'es_tutor' => true,
-                'necesita_perfil_tutor' => true,
-                'data' => $dependientes->first(),
-                'todos_los_dependientes' => $dependientes
-            ]);
+                'status'       => 'success',
+                'es_tutor'     => false,
+                'data'         => $dependienteDirecto,
+                'dependientes' => []
+            ], 200);
         }
 
         return response()->json([
-            'status' => 'error',
-            'message' => 'El usuario no cuenta con un perfil clínico en la tabla Pacientes.'
+            'status'  => 'error',
+            'message' => 'El usuario no cuenta con un perfil clínico registrado.'
         ], 404);
     }
+
     public function emanciparPaciente(Request $request, $pacienteId): JsonResponse
     {
         $validated = $request->validate([
@@ -206,6 +249,7 @@ class PatientController extends Controller
                 ]);
 
             DB::commit();
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'El paciente ha sido promovido a usuario independiente con éxito.'
@@ -227,20 +271,25 @@ class PatientController extends Controller
             'Nombre' => 'required|string',
             'Apellido' => 'required|string',
             'Telefono' => 'required|string',
+            'Nacionalidad' => 'nullable|string|max:50',
+            'TipoSangre'   => 'nullable|string|max:10',
         ]);
-
-        $usuario = DB::table('Usuarios')->where('UsuarioID', $validated['UsuarioID'])->first();
 
         DB::table('Pacientes')->insert([
-            'UsuarioID' => $validated['UsuarioID'],
-            'DNI' => $validated['DNI'],
-            'Nombre' => $validated['Nombre'],
-            'Apellido' => $validated['Apellido'],
-            'Telefono' => $validated['Telefono'],
+            'UsuarioID'      => $validated['UsuarioID'],
+            'DNI'            => $validated['DNI'],
+            'Nombre'         => $validated['Nombre'],
+            'Apellido'       => $validated['Apellido'],
+            'Telefono'       => $validated['Telefono'],
+            'Nacionalidad'   => $validated['Nacionalidad'] ?? 'Hondureña',
+            'TipoSangre'     => $validated['TipoSangre'] ?? null,
             'es_dependiente' => 0,
-            'Estado' => 1
+            'Estado'         => 1
         ]);
 
-        return response()->json(['status' => 'success', 'message' => 'Tu perfil clínico individual ha sido creado con éxito.']);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Tu perfil clínico individual ha sido creado con éxito.'
+        ]);
     }
 }

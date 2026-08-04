@@ -1,7 +1,7 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -18,6 +18,7 @@ class AppointmentController extends Controller
     public function store(Request $request): JsonResponse
     {
         try {
+            Log::info('[Controller] Datos recibidos en store()', $request->all());
             $validated = $request->validate([
                 'UsuarioID' => 'required|integer',
                 'doctor_id'   => 'required|integer',
@@ -88,14 +89,10 @@ class AppointmentController extends Controller
     public function getHistoryByPatient($usuarioId): JsonResponse
     {
         try {
-            $history = $this->repository->getHistoryByPatient((int)$usuarioId);
-
-            return response()->json($history);
+            $history = $this->repository->getMedicalHistory((int)$usuarioId);
+            return response()->json($history, 200);
         } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => $e->getMessage()
-            ], 400);
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 
@@ -103,28 +100,23 @@ class AppointmentController extends Controller
     public function getPrescriptionsByPatient($usuarioId): JsonResponse
     {
         try {
-            $recetas = \Illuminate\Support\Facades\DB::select("
-                SELECT
-                    R.RecetaID,
-                    R.ConsultaID,
-                    R.CodigoCanje,
-                    R.NombreMedicamento,
-                    R.Dosis,
-                    R.Indicaciones,
-                    R.YaCanjeada,
-                    R.FechaEmision,
-                    D.Nombre + ' ' + D.Apellido as Doctor
-                FROM Recetas R
-                JOIN Consultas CON ON R.ConsultaID = CON.ConsultaID
-                JOIN Citas C ON CON.CitaID = C.CitaID
-                JOIN Doctores D ON C.DoctorID = D.DoctorID
-                WHERE C.PacienteID = (SELECT PacienteID FROM Pacientes WHERE UsuarioID = ?)
-                ORDER BY R.FechaEmision DESC
-            ", [$usuarioId]);
-
+            $recetas = $this->repository->getPrescriptions((int)$usuarioId);
             return response()->json($recetas, 200);
         } catch (\Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function getExamsByPatient($usuarioId): \Illuminate\Http\JsonResponse
+    {
+        try {
+            $examenSistemas = $this->repository->getExams((int)$usuarioId);
+            return response()->json($examenSistemas, 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Error al obtener examen físico: ' . $e->getMessage()
+            ], 500);
         }
     }
 
@@ -227,36 +219,6 @@ class AppointmentController extends Controller
             return response()->json(['status' => 'success', 'message' => 'Cita rechazada']);
         } catch (\Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
-        }
-    }
-
-    public function getExamsByPatient($usuarioId): \Illuminate\Http\JsonResponse
-    {
-        try {
-            $examenSistemas = \Illuminate\Support\Facades\DB::select("
-                SELECT
-                    CES.ExamenSistemaID,
-                    C.CitaID,
-                    CON.ConsultaID,
-                    C.FechaHora,
-                    D.Nombre + ' ' + D.Apellido as Doctor,
-                    CES.SistemaID,
-                    CES.EsNormal,
-                    CES.NotasAdicionales
-                FROM consulta_examen_sistemas CES
-                JOIN Consultas CON ON CES.ConsultaID = CON.ConsultaID
-                JOIN Citas C ON CON.CitaID = C.CitaID
-                JOIN Doctores D ON C.DoctorID = D.DoctorID
-                WHERE C.PacienteID = (SELECT PacienteID FROM Pacientes WHERE UsuarioID = ?)
-                ORDER BY C.FechaHora DESC
-            ", [$usuarioId]);
-
-            return response()->json($examenSistemas, 200);
-        } catch (\Exception $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error al obtener examen físico: ' . $e->getMessage()
-            ], 500);
         }
     }
 

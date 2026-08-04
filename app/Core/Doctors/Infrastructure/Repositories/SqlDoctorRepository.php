@@ -17,19 +17,33 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             ->first();
 
         if (!$rol) {
-            throw new Exception("El rol 'Doctor' no está configurado en la base de datos.");
+            throw new \Exception("El rol 'Doctor' no está configurado en la base de datos.");
         }
 
-        return DB::statement('EXEC sp_RegistrarDoctor ?, ?, ?, ?, ?, ?, ?, ?, ?', [
+        $hablaIngles = filter_var($datos['habla_ingles'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+        $disponibleDomicilio = filter_var($datos['disponible_domicilio'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+
+        return DB::statement('EXEC sp_RegistrarDoctor ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?', [
             $datos['email'],
             $passwordHash,
             $rol->RolID,
+            $datos['entidad_id'] ?? null,
             $datos['especialidad_id'],
-            $datos['entidad_id'],
             $datos['nombre'],
             $datos['apellido'],
             $datos['numero_colegiado'],
-            $datos['ruta_documento'] ?? null
+            $datos['ruta_foto'] ?? null,
+            $datos['ruta_titulo_medico'] ?? null,
+            $datos['ruta_titulo_especialista'] ?? null,
+            $datos['ruta_constancia_colegio'] ?? null,
+            $datos['ruta_dni'] ?? null,
+            $datos['nacionalidad'] ?? 'Hondureña',
+            $hablaIngles,
+            $datos['otros_idiomas'] ?? null,
+            $disponibleDomicilio,
+            $datos['latitud'] ?? null,
+            $datos['longitud'] ?? null,
+            $datos['direccion_consultorio'] ?? null
         ]);
     }
 
@@ -61,13 +75,24 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                     'Usuarios.Email'     => $datos['email']
                 ]);
 
+            $hablaIngles = filter_var($datos['habla_ingles'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+            $disponibleDomicilio = filter_var($datos['disponible_domicilio'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+
             return DB::table('Doctores')
                 ->where('DoctorID', $id)
                 ->update([
-                    'EspecialidadID'   => $datos['especialidad_id'],
-                    'Nombre'           => $datos['nombre'],
-                    'Apellido'         => $datos['apellido'],
-                    'NumeroColegiado'  => $datos['numero_colegiado']
+                    'EspecialidadID'       => $datos['especialidad_id'],
+                    'Nombre'               => $datos['nombre'],
+                    'Apellido'             => $datos['apellido'],
+                    'NumeroColegiado'      => $datos['numero_colegiado'],
+
+                    'Nacionalidad'         => $datos['nacionalidad'] ?? 'Hondureña',
+                    'HablaIngles'          => $hablaIngles,
+                    'OtrosIdiomas'         => $datos['otros_idiomas'] ?? null,
+                    'DisponibleDomicilio'  => $disponibleDomicilio,
+                    'Latitud'              => $datos['latitud'] ?? null,
+                    'Longitud'             => $datos['longitud'] ?? null,
+                    'DireccionConsultorio' => $datos['direccion_consultorio'] ?? null,
                 ]);
         });
     }
@@ -93,7 +118,14 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                 'D.Apellido',
                 'E.NombreEspecialidad as Especialidad',
                 'D.EsVerificado',
-                'D.Estado'
+                'D.Estado',
+                'D.Nacionalidad',
+                'D.HablaIngles',
+                'D.OtrosIdiomas',
+                'D.DisponibleDomicilio',
+                'D.Latitud',
+                'D.Longitud',
+                'D.DireccionConsultorio'
             )
             ->where('D.Estado', 1);
 
@@ -145,8 +177,8 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
 
     public function complete(array $data): bool {
         $data = json_decode(json_encode($data), true);
-
         $cita = DB::table('Citas')->where('CitaID', $data['cita_id'])->first();
+
         if (!$cita) {
             throw new \Exception("La cita ID: {$data['cita_id']} no existe.");
         }
@@ -158,16 +190,41 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             $data['presupuesto_total'] = (float)$data['presupuesto_total'];
         }
 
-        $payloadJsonStr = json_encode($data);
+        // Envolvemos todo en una transacción como lo tenías en el otro repo
+        return DB::transaction(function () use ($data, $cita) {
+            $payloadJsonStr = json_encode($data);
 
-        DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
-            $data['cita_id'],
-            $data['diagnostico'],
-            $data['notas_medicas'] ?? null,
-            $payloadJsonStr,
-            'Completada'
-        ]);
+            // 1. Finalizar la consulta actual
+            DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
+                $data['cita_id'],
+                $data['diagnostico'],
+                $data['notas_medicas'] ?? null,
+                $payloadJsonStr,
+                'Completada'
+            ]);
 
-        return true;
+            // 2. Lógica para crear la cita de seguimiento automatizada
+            $crearSeguimiento = filter_var($data['crear_seguimiento'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $fechaSeguimiento = $data['seguimiento_fecha_hora'] ?? null;
+
+            if ($crearSeguimiento && !empty($fechaSeguimiento)) {
+                $motivoSeguimiento = 'Cita de revisión programada post-consulta #' . $data['cita_id'];
+
+                DB::table('Citas')->insert([
+                    'PacienteID'           => $cita->PacienteID,
+                    'DoctorID'             => $cita->DoctorID,
+                    'EntidadID'            => $cita->EntidadID,
+                    'FechaHora'            => $fechaSeguimiento,
+                    'Motivo'               => $motivoSeguimiento,
+                    'EstadoCita'           => 'Confirmada', // Estado confirmada para que aparezca en agenda
+                    'Estado'               => 1,
+                    'Sintomas'             => 'Seguimiento clínico automatizado.',
+                    'Alergias'             => $cita->Alergias ?? null,
+                    'MedicamentosActuales' => $cita->MedicamentosActuales ?? null
+                ]);
+            }
+
+            return true;
+        });
     }
 }

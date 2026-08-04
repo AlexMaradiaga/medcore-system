@@ -86,4 +86,22 @@ class SaaSController extends Controller
 
         return response()->json($data);
     }
+
+    public function obtenerEstadoSaaS(Request $request): JsonResponse
+    {
+        try {
+            $usuarioId = $request->user()->UsuarioID ?? $request->user()->id ?? auth()->id();
+            $estado = $this->limitService->obtenerEstadoSaaSCompleto((int) $usuarioId);
+
+            return response()->json([
+                'success' => true,
+                'data'    => $estado
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al consultar estado SaaS: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }

@@ -111,13 +111,22 @@ class DoctorController extends Controller
                     'D.RutaFoto as Foto',
                     'D.EsVerificado',
                     'D.Estado',
+                    'D.Nacionalidad',
+                    'D.HablaIngles',
+                    'D.OtrosIdiomas',
+                    'D.DisponibleDomicilio',
+                    'D.Latitud',
+                    'D.Longitud',
+                    'D.DireccionConsultorio',
                     \Illuminate\Support\Facades\DB::raw('ISNULL(MAX(SM.Precio), 90) as CostoConsulta')
                 )
                 ->where('U.EntidadID', $entidadId)
                 ->where('D.Estado', 1)
                 ->groupBy(
                     'D.DoctorID', 'D.Nombre', 'D.Apellido', 'E.NombreEspecialidad',
-                    'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado'
+                    'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado',
+                    'D.Nacionalidad', 'D.HablaIngles', 'D.OtrosIdiomas',
+                    'D.DisponibleDomicilio', 'D.Latitud', 'D.Longitud', 'D.DireccionConsultorio'
                 )
                 ->get();
 
@@ -128,5 +137,31 @@ class DoctorController extends Controller
                 'message' => 'Error al obtener doctores de la clínica: ' . $e->getMessage()
             ], 500);
         }
+    }
+    public function guardarUbicacionConsultorio(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'doctor_id'            => 'required|integer',
+            'latitud'              => 'required|numeric',
+            'longitud'             => 'required|numeric',
+            'direccion_consultorio' => 'required|string|max:255',
+            'habla_ingles'         => 'nullable|boolean',
+            'disponible_domicilio' => 'nullable|boolean',
+        ]);
+
+        DB::table('Doctores')
+            ->where('DoctorID', $validated['doctor_id'])
+            ->update([
+                'Latitud'              => $validated['latitud'],
+                'Longitud'             => $validated['longitud'],
+                'DireccionConsultorio' => $validated['direccion_consultorio'],
+                'HablaIngles'          => $validated['habla_ingles'] ?? 0,
+                'DisponibleDomicilio'  => $validated['disponible_domicilio'] ?? 0,
+            ]);
+
+        return response()->json([
+            'status'  => 'success',
+            'message' => 'Ubicación y configuración del consultorio actualizadas correctamente.'
+        ]);
     }
 }

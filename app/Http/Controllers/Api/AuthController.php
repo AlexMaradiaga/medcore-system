@@ -200,27 +200,29 @@ class AuthController extends Controller
     {
         try {
             $validated = $request->validate([
-                'usuario_id'   => 'required|integer',
-                'old_password' => 'required|string',
-                'new_password' => 'required|string|min:8|confirmed',
+                'email'        => 'required|email',
+                'new_password' => 'required|string|min:8',
             ]);
 
             $this->repository->updatePassword(
-                $validated['usuario_id'],
-                $validated['old_password'],
+                $validated['email'],
                 $validated['new_password']
             );
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'Contraseña actualizada con éxito.'
+                'status'  => 'success',
+                'message' => 'Contraseña reestablecida con éxito. Ya puedes iniciar sesión.'
             ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
-            ], 500);
+                'status' => 'error',
+                'error'  => $e->getMessage()
+            ], 400);
         }
     }
 

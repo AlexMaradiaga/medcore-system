@@ -27,22 +27,24 @@ class SqlAuthRepository implements AuthRepositoryInterface
         );
     }
 
-    public function updatePassword(int $usuarioId, string $oldPassword, string $newPassword): bool
-    {
-        $usuario = DB::table('Usuarios')->where('UsuarioID', $usuarioId)->first();
+    public function updatePassword(
+        string $email,
+        string $newPassword
+    ): bool {
+        $usuario = DB::table('Usuarios')
+            ->where('Email', $email)
+            ->first();
 
         if (!$usuario) {
-            throw new \Exception("Usuario no encontrado.");
-        }
-
-        if (!Hash::check($oldPassword, $usuario->PasswordHash)) {
-            throw new \Exception("La contraseña actual es incorrecta.");
+            throw new \Exception(
+                "No existe ninguna cuenta asociada a este correo."
+            );
         }
 
         return DB::table('Usuarios')
-            ->where('UsuarioID', $usuarioId)
+            ->where('UsuarioID', $usuario->UsuarioID)
             ->update([
                 'PasswordHash' => Hash::make($newPassword),
-            ]);
+            ]) > 0;
     }
 }

@@ -23,12 +23,12 @@ use App\Http\Controllers\Api\{
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register-patient', [PatientController::class, 'store']);
 Route::post('/register-doctor', [AuthController::class, 'registerDoctor']);
+Route::put('/auth/password', [AuthController::class, 'changePassword']);
 
 // RUTAS PROTEGIDAS (Sanctum Core)
 Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('logout', [AuthController::class, 'logout']);
-    Route::put('/auth/password', [AuthController::class, 'changePassword']);
     Route::get('/system/settings', [SystemSettingController::class, 'index']);
     Route::post('/system/settings', [SystemSettingController::class, 'updateSetting']);
 

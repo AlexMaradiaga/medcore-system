@@ -45,6 +45,7 @@ class PatientController extends Controller
                 'tutor_nombre'             => $esDependiente ? 'required|string' : 'nullable|string',
                 'tutor_email'              => $esDependiente ? 'required|email' : 'nullable|email',
                 'tutor_telefono'           => $esDependiente ? 'required|string' : 'nullable|string',
+                'parentesco'               => $esDependiente ? 'required|string|max:50' : 'nullable|string|max:50', // 👈 AGREGAR ESTA LÍNEA
                 'documento_identidad_url'  => $esDependiente ? 'required|string' : 'nullable|string'
             ]);
 
@@ -118,88 +119,37 @@ class PatientController extends Controller
             ], 400);
         }
     }
-    public function obtenerPorUsuario($usuarioId)
+    public function obtenerPorUsuario($id): JsonResponse
     {
-        // Consultamos directamente el paciente por su UsuarioID
-        $paciente = DB::table('Pacientes')
-            ->where('UsuarioID', $usuarioId)
-            ->where('Estado', 1)
-            ->select([
-                'PacienteID as id',
-                'UsuarioID as usuario_id',
-                'Nombre as nombre',
-                'Apellido as apellido',
-                'DNI as dni',
-                'Telefono as telefono',
-                'Edad as fecha_nacimiento',
-                'Genero as genero',
-                'TipoSangre as tipo_sangre',
-                'Aseguradora as aseguradora',
-                'NumeroPoliza as poliza',
-                'NombreContactoEmergencia as nombre_contacto_emergencia',
-                'TelefonoContactoEmergencia as telefono_contacto_emergencia',
-                'es_dependiente',
-                'TutorID as tutor_id',
-                'parentesco',
-                'tutor_dni',
-                'tutor_nombre',
-                'tutor_telefono',
-                'tutor_email'
-            ])
-            ->first();
+        try {
+            $resultado = $this->repository->obtenerPorUsuarioId((int) $id);
 
-        if ($paciente) {
-            $dependientes = $this->repository->obtenerDependientesPorTutorId((int)$paciente->id);
+            if (!$resultado) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Perfil de paciente o tutor no encontrado para este usuario.'
+                ], 404);
+            }
+
+            $dependientes = $resultado->dependientes ?? [];
+            $esTutor = (bool)($resultado->es_tutor ?? (count($dependientes) > 0));
 
             return response()->json([
-                'status'       => 'success',
-                'es_tutor'     => count($dependientes) > 0,
-                'data'         => $paciente,
-                'dependientes' => $dependientes
+                'es_tutor'               => $esTutor,
+                'necesita_perfil_tutor'  => false,
+                'todos_los_dependientes' => $dependientes,
+                'dependientes'           => $dependientes,
+                'data'                   => $resultado->data ?? null
             ], 200);
-        }
 
-        $dependienteDirecto = DB::table('Pacientes as P')
-            ->leftJoin('Pacientes as T', 'P.TutorID', '=', 'T.PacienteID')
-            ->where('P.TutorID', $usuarioId)
-            ->orWhere('P.PacienteID', $usuarioId)
-            ->where('P.Estado', 1)
-            ->select([
-                'P.PacienteID as id',
-                'P.UsuarioID as usuario_id',
-                'P.Nombre as nombre',
-                'P.Apellido as apellido',
-                'P.DNI as dni',
-                'P.Telefono as telefono',
-                'P.Edad as fecha_nacimiento',
-                'P.Genero as genero',
-                'P.TipoSangre as tipo_sangre',
-                'P.Aseguradora as aseguradora',
-                'P.NumeroPoliza as poliza',
-                'P.NombreContactoEmergencia as nombre_contacto_emergencia',
-                'P.TelefonoContactoEmergencia as telefono_contacto_emergencia',
-                'P.es_dependiente',
-                'P.TutorID as tutor_id',
-                'P.parentesco',
-                'T.Nombre as tutor_nombre',
-                'T.DNI as tutor_dni',
-                'T.Telefono as tutor_telefono'
-            ])
-            ->first();
-
-        if ($dependienteDirecto) {
+        } catch (\Throwable $e) {
             return response()->json([
-                'status'       => 'success',
-                'es_tutor'     => false,
-                'data'         => $dependienteDirecto,
-                'dependientes' => []
-            ], 200);
+                'status' => 'error',
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ], 500);
         }
-
-        return response()->json([
-            'status'  => 'error',
-            'message' => 'El usuario no cuenta con un perfil clínico registrado.'
-        ], 404);
     }
 
     public function emanciparPaciente(Request $request, $pacienteId): JsonResponse

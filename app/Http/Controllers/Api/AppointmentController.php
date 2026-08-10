@@ -18,38 +18,43 @@ class AppointmentController extends Controller
     public function store(Request $request): JsonResponse
     {
         try {
-            Log::info('[Controller] Datos recibidos en store()', $request->all());
-            $validated = $request->validate([
-                'UsuarioID' => 'required|integer',
-                'doctor_id'   => 'required|integer',
-                'entidad_id'  => 'required|integer',
-                'fecha_hora'  => 'required|date_format:Y-m-d H:i:s',
-                'motivo'      => 'required|string|max:255',
-                'sintomas'    => 'nullable|string',
-                'alergias'    => 'nullable|string',
-                'edad'        => 'required|integer',
-                'genero'      => 'required|string|max:1',
-                'medicamentos_actuales' => 'nullable|string',
-                'aseguradora' => 'nullable|string|max:100',
-                'numero_poliza' => 'nullable|string|max:50',
-                'nombre_contacto_emergencia' => 'nullable|string|max:100',
-                'telefono_contacto_emergencia' => 'nullable|string|max:20',
+            $esDependiente = filter_var($request->input('es_dependiente'), FILTER_VALIDATE_BOOLEAN);
 
-                'cronicas_ids' => 'nullable|array',
-                'cronicas_ids.*' => 'integer'
+            $datos = $request->validate([
+                'dni'                      => 'required|string',
+                'nombre'                   => 'required|string',
+                'apellido'                 => 'required|string',
+                'telefono'                 => 'nullable|string',
+                'entidad_id'               => 'required|integer',
+                'es_dependiente'           => 'nullable',
+
+                'nacionalidad'             => 'nullable|string|max:50',
+                'tipo_sangre'              => 'nullable|string|max:10',
+
+                'email'                    => $esDependiente ? 'nullable|email' : 'required|email',
+                'password'                 => $esDependiente ? 'nullable|string|min:6' : 'required|string|min:6',
+
+                'tutor_dni'                => $esDependiente ? 'required|string' : 'nullable|string',
+                'tutor_nombre'             => $esDependiente ? 'required|string' : 'nullable|string',
+                'parentesco'               => $esDependiente ? 'required|string|max:50' : 'nullable|string|max:50', // 👈 AGREGADO AQUÍ
+                'tutor_email'              => $esDependiente ? 'required|email' : 'nullable|email',
+                'tutor_telefono'           => $esDependiente ? 'required|string' : 'nullable|string',
+                'documento_identidad_url'  => $esDependiente ? 'required|string' : 'nullable|string'
             ]);
 
-            $this->repository->create($validated);
+            $this->handler->execute($datos);
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Cita agendada correctamente'
+                'message' => 'Paciente registrado correctamente en MedGo+'
             ], 201);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
             ], 400);
         }
     }
@@ -86,13 +91,47 @@ class AppointmentController extends Controller
 
 
 
-    public function getHistoryByPatient($usuarioId): JsonResponse
+    public function getHistoryByPatient($id): \Illuminate\Http\JsonResponse
     {
         try {
-            $history = $this->repository->getMedicalHistory((int)$usuarioId);
-            return response()->json($history, 200);
-        } catch (\Exception $e) {
-            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+            $paramId = (int) $id;
+
+            $citas = \Illuminate\Support\Facades\DB::table('Citas as c')
+                ->join('Pacientes as p', 'c.PacienteID', '=', 'p.PacienteID')
+                ->leftJoin('Doctores as d', 'c.DoctorID', '=', 'd.DoctorID')
+                ->leftJoin('Entidades as e', 'c.EntidadID', '=', 'e.EntidadID')
+                ->leftJoin('Consultas as con', 'c.CitaID', '=', 'con.CitaID')
+                ->where(function ($query) use ($paramId) {
+                    $query->where('p.PacienteID', $paramId)
+                        ->orWhere('p.UsuarioID', $paramId);
+                })
+                ->select([
+                    'c.CitaID',
+                    'c.CitaID as Folio',
+                    'c.FechaHora',
+                    'c.EstadoCita',
+                    'c.EstadoCita as Estado',
+                    \Illuminate\Support\Facades\DB::raw("'General' as TipoCita"),
+                    'c.Motivo',
+                    'p.PacienteID',
+                    'p.Nombre as PacienteNombre',
+                    \Illuminate\Support\Facades\DB::raw("COALESCE(CONCAT(d.Nombre, ' ', d.Apellido), 'Dr. Por Asignar') as Doctor"),
+                    \Illuminate\Support\Facades\DB::raw("COALESCE(e.NombreEntidad, 'Clínica Principal') as Clinica"),
+                    'con.Diagnostico',
+                    // 👇 Evita el choque si 'Notas' no existe en 'Consultas'
+                    \Illuminate\Support\Facades\DB::raw("NULL as Sintomas")
+                ])
+                ->orderBy('c.FechaHora', 'DESC')
+                ->get();
+
+            return response()->json($citas, 200);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => $e->getMessage(),
+                'line'    => $e->getLine()
+            ], 500);
         }
     }
 

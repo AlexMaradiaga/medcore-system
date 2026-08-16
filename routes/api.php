@@ -153,13 +153,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // RUTAS DE LABORATORIO (Acceso Compartido Paciente/Doctor)
     Route::prefix('laboratorio')->group(function () {
+        // Catálogo y Consultas
         Route::get('catalogo', [LaboratoryController::class, 'catalogo']);
         Route::get('paciente/{pacienteId}/ordenes', [LaboratoryController::class, 'ordenesPaciente']);
         Route::get('orden/{ordenId}/resultados', [LaboratoryController::class, 'resultadosOrden']);
+        // Gestión de Órdenes (Operativo)
         Route::get('/ordenes', [LaboratoryController::class, 'obtenerOrdenes']);
+        Route::get('/ordenes/{ordenId}/examenes', [LaboratoryController::class, 'obtenerExamenesDetalle']);
+        Route::post('/ordenes', [LaboratoryController::class, 'crearSolicitudDigital']);
         Route::put('/ordenes/{id}/aceptar', [LaboratoryController::class, 'aceptarOrden']);
         Route::post('/ordenes/escanear-qr', [LaboratoryController::class, 'validarQR']);
         Route::post('/ordenes/{id}/subir-resultados', [LaboratoryController::class, 'subirResultadosPDF']);
+        // Tarifario
+        Route::put('/tarifario/{examId}', [LaboratoryController::class, 'actualizarTarifa']);
+        Route::put('/ordenes/{ordenId}/actualizar-examenes', [LaboratoryController::class, 'actualizarExamenesOrden']);
     });
 
     // 1. Ruta para obtener todas las instituciones/clínicas

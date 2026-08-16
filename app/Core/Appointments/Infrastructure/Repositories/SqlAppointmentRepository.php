@@ -39,12 +39,12 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 $data['estado_cita'] ?? 'Pendiente',
                 $data['sintomas'] ?? null,
                 $data['alergias'] ?? null,
-                $data['edad'],
-                $data['genero'],
+                $data['edad'] ?? null,
+                $data['genero'] ?? null,
                 $data['aseguradora'] ?? null,
                 $data['numero_poliza'] ?? null,
-                $data['nombre_contacto_emergencia'],
-                $data['telefono_contacto_emergencia'],
+                $data['nombre_contacto_emergencia'] ?? null,
+                $data['telefono_contacto_emergencia'] ?? null,
                 $data['medicamentos_actuales'] ?? null
             ]);
 
@@ -67,7 +67,6 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
             return true;
         });
     }
-
     public function getPendingByDoctor(int $doctorId): array {
        return DB::select("EXEC sp_ObtenerCitasDashboardDoctor ?", [$doctorId]);
     }

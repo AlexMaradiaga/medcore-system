@@ -5,42 +5,38 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
-use PDO;
+use Exception;
+use App\Core\Laboratories\Domain\Ports\LaboratoryRepositoryInterface;
 
 class LaboratoryDashboardController extends Controller
 {
+    public function __construct(
+        private LaboratoryRepositoryInterface $repository
+    ) {}
+
     public function getDashboardData(Request $request): JsonResponse
     {
         try {
-            $entidadId = $request->user()->EntidadID ?? null;
+            $entidadId = $request->query('laboratorio_id')
+                      ?? $request->user()?->EntidadID
+                      ?? $request->user()?->entidad_id;
 
             if (!$entidadId) {
                 return response()->json([
-                    'status' => 'error',
+                    'status'  => 'error',
                     'message' => 'El usuario no pertenece a ninguna entidad analítica.'
                 ], 403);
             }
 
-            $pdo = DB::connection('sqlsrv')->getPdo();
-            $stmt = $pdo->prepare("EXEC sp_ObtenerDashboardLaboratorio ?");
-            $stmt->execute([$entidadId]);
-
-            $kpis = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stmt->nextRowset();
-            $ordenesRecientes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            $stmt->closeCursor();
+            $metrics = $this->repository->getDashboardMetrics((int)$entidadId);
 
             return response()->json([
                 'status' => 'success',
-                'data' => [
-                    'kpis' => $kpis ? $kpis : [],
-                    'ordenes_recientes' => $ordenesRecientes
-                ]
+                'data'   => $metrics
             ], 200);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Error al capturar métricas del laboratorio: ' . $e->getMessage()
             ], 500);
         }

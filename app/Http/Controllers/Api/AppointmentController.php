@@ -18,43 +18,46 @@ class AppointmentController extends Controller
     public function store(Request $request): JsonResponse
     {
         try {
-            $esDependiente = filter_var($request->input('es_dependiente'), FILTER_VALIDATE_BOOLEAN);
-
-            $datos = $request->validate([
-                'dni'                      => 'required|string',
-                'nombre'                   => 'required|string',
-                'apellido'                 => 'required|string',
-                'telefono'                 => 'nullable|string',
-                'entidad_id'               => 'required|integer',
-                'es_dependiente'           => 'nullable',
-
-                'nacionalidad'             => 'nullable|string|max:50',
-                'tipo_sangre'              => 'nullable|string|max:10',
-
-                'email'                    => $esDependiente ? 'nullable|email' : 'required|email',
-                'password'                 => $esDependiente ? 'nullable|string|min:6' : 'required|string|min:6',
-
-                'tutor_dni'                => $esDependiente ? 'required|string' : 'nullable|string',
-                'tutor_nombre'             => $esDependiente ? 'required|string' : 'nullable|string',
-                'parentesco'               => $esDependiente ? 'required|string|max:50' : 'nullable|string|max:50', // 👈 AGREGADO AQUÍ
-                'tutor_email'              => $esDependiente ? 'required|email' : 'nullable|email',
-                'tutor_telefono'           => $esDependiente ? 'required|string' : 'nullable|string',
-                'documento_identidad_url'  => $esDependiente ? 'required|string' : 'nullable|string'
+            $validated = $request->validate([
+                'doctor_id'                    => 'required|integer',
+                'entidad_id'                   => 'required|integer',
+                'fecha_hora'                   => 'required|date_format:Y-m-d H:i:s',
+                'motivo'                       => 'required|string|max:255',
+                'sintomas'                     => 'nullable|string',
+                'edad'                         => 'required|integer',
+                'genero'                       => 'required|string|max:1',
+                'telefono'                     => 'nullable|string',
+                'alergias'                     => 'nullable|string',
+                'aseguradora'                  => 'nullable|string',
+                'numero_poliza'                => 'nullable|string',
+                'nombre_contacto_emergencia'   => 'nullable|string',
+                'telefono_contacto_emergencia' => 'nullable|string',
+                'medicamentos_actuales'        => 'nullable|string',
+                'cronicas_ids'                 => 'nullable|array',
+                'cronicas_ids.*'               => 'integer',
+                'UsuarioID'                    => 'nullable|integer',
+                'usuario_id'                   => 'nullable|integer',
+                'paciente_id'                  => 'nullable|integer'
             ]);
 
-            $this->handler->execute($datos);
+            // Asignación de UsuarioID de la sesión si no se envía explícitamente
+            $validated['UsuarioID'] = $validated['UsuarioID']
+                ?? $validated['usuario_id']
+                ?? $request->user()?->UsuarioID
+                ?? $request->user()?->id;
+
+            $this->repository->create($validated);
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'Paciente registrado correctamente en MedGo+'
+                'status'  => 'success',
+                'message' => 'Cita agendada correctamente en MedGo+'
             ], 201);
 
         } catch (\Throwable $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine()
+                'line'    => $e->getLine()
             ], 400);
         }
     }

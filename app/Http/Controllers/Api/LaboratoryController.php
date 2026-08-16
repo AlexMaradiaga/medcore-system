@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Exception;
 use App\Core\Laboratories\Domain\Ports\LaboratoryRepositoryInterface;
 
 class LaboratoryController extends Controller
@@ -18,7 +19,7 @@ class LaboratoryController extends Controller
         try {
             $data = $this->repository->getCatalogoExamenes();
             return response()->json(['estado' => 'success', 'datos' => $data]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return response()->json(['estado' => 'error', 'mensaje' => $e->getMessage()], 500);
         }
     }
@@ -27,9 +28,13 @@ class LaboratoryController extends Controller
     {
         try {
             $data = $this->repository->getOrdenesPorPaciente((int)$pacienteId);
-            return response()->json(['estado' => 'success', 'datos' => $data]);
-        } catch (\Exception $e) {
-            return response()->json(['estado' => 'error', 'mensaje' => $e->getMessage()], 500);
+            return response()->json([
+                'status' => 'success',
+                'estado' => 'success',
+                'datos'  => $data
+            ]);
+        } catch (Exception $e) {
+            return response()->json(['status' => 'error', 'mensaje' => $e->getMessage()], 500);
         }
     }
 
@@ -38,7 +43,7 @@ class LaboratoryController extends Controller
         try {
             $data = $this->repository->getResultadosPorOrden((int)$ordenId);
             return response()->json(['estado' => 'success', 'datos' => $data]);
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             return response()->json(['estado' => 'error', 'mensaje' => $e->getMessage()], 500);
         }
     }
@@ -49,30 +54,14 @@ class LaboratoryController extends Controller
             $laboratorioId = $request->query('laboratorio_id');
             $estado = $request->query('estado');
 
-            $query = DB::table('OrdenesLaboratorio as OL')
-                ->join('Pacientes as P', 'OL.PacienteID', '=', 'P.PacienteID')
-                ->leftJoin('Doctores as D', 'OL.DoctorID', '=', 'D.DoctorID')
-                ->select(
-                    'OL.OrdenID',
-                    'OL.CodigoOrden',
-                    'OL.Estado',
-                    'OL.MontoTotal',
-                    'OL.ComisionMonto',
-                    'OL.ArchivoPdfPath',
-                    'OL.FechaOrden',
-                    'OL.FechaCompletado',
-                    DB::raw("P.Nombre + ' ' + P.Apellido as Paciente"),
-                    'P.DNI as PacienteDNI',
-                    'P.Telefono as PacienteTelefono',
-                    DB::raw("COALESCE(D.Nombre + ' ' + D.Apellido, 'Solicitud Directa') as Doctor")
-                )
-                ->where('OL.LaboratorioID', $laboratorioId);
-
-            if ($estado && $estado !== 'Todos') {
-                $query->where('OL.Estado', $estado);
+            if (!$laboratorioId) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No se proporcionó el parámetro laboratorio_id'
+                ], 400);
             }
 
-            $ordenes = $query->orderBy('OL.FechaOrden', 'DESC')->get();
+            $ordenes = $this->repository->obtenerOrdenesOperativas((int)$laboratorioId, $estado);
 
             return response()->json([
                 'status' => 'success',
@@ -83,18 +72,25 @@ class LaboratoryController extends Controller
         }
     }
 
-    /**
-     * Transición 1: Cambiar estado a 'Aceptada'
-     */
+    public function obtenerExamenesDetalle($ordenId): JsonResponse
+    {
+        try {
+            $data = $this->repository->getExamenesPorOrden((int)$ordenId);
+            return response()->json([
+                'status' => 'success',
+                'datos'  => $data
+            ], 200);
+        } catch (Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
     public function aceptarOrden($ordenId): JsonResponse
     {
         try {
-            $afectados = DB::table('OrdenesLaboratorio')
-                ->where('OrdenID', $ordenId)
-                ->where('Estado', 'Emitida')
-                ->update(['Estado' => 'Aceptada']);
+            $exito = $this->repository->aceptarOrden((int)$ordenId);
 
-            if (!$afectados) {
+            if (!$exito) {
                 return response()->json([
                     'status' => 'error',
                     'message' => 'La orden no está en estado "Emitida" o no existe.'
@@ -110,106 +106,133 @@ class LaboratoryController extends Controller
         }
     }
 
-    /**
-     * Transición 2: Escaneo / Validación QR (Cambia a 'Paciente Recibido')
-     */
     public function validarQR(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'codigo_orden' => 'required|string',
+            'codigo_orden'   => 'required|string',
             'laboratorio_id' => 'required|integer'
         ]);
 
         try {
-            $orden = DB::table('OrdenesLaboratorio')
-                ->where('CodigoOrden', $validated['codigo_orden'])
-                ->where('LaboratorioID', $validated['laboratorio_id'])
-                ->first();
+            $resultado = $this->repository->validarQR($validated['codigo_orden'], (int)$validated['laboratorio_id']);
 
-            if (!$orden) {
+            if ($resultado['status'] !== 'success') {
                 return response()->json([
-                    'status' => 'error',
-                    'message' => 'Código QR / Orden no encontrada para este laboratorio.'
-                ], 404);
+                    'status'  => $resultado['status'],
+                    'message' => $resultado['message']
+                ], $resultado['code']);
             }
-
-            if ($orden->Estado === 'Completada') {
-                return response()->json([
-                    'status' => 'warning',
-                    'message' => 'Esta orden ya fue procesada y completada anteriormente.'
-                ], 400);
-            }
-
-            // Actualizar estado a 'Paciente Recibido'
-            DB::table('OrdenesLaboratorio')
-                ->where('OrdenID', $orden->OrdenID)
-                ->update(['Estado' => 'Paciente Recibido']);
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'Recepción de paciente validada correctamente.',
-                'orden' => $orden
+                'status'  => 'success',
+                'message' => $resultado['message'],
+                'orden'   => $resultado['orden']
             ]);
         } catch (Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Transición 3: Carga de resultados PDF (Cambia a 'Completada' y gatilla comisión 5%)
-     */
     public function subirResultadosPDF(Request $request, $ordenId): JsonResponse
     {
-        $validated = $request->validate([
-            'archivo_pdf' => 'required|file|mimes:pdf|max:10240', // Máx 10 MB
+        $request->validate([
+            'archivo_pdf' => 'required|file|mimes:pdf|max:10240',
         ]);
 
         try {
-            $orden = DB::table('OrdenesLaboratorio')->where('OrdenID', $ordenId)->first();
-            if (!$orden) {
-                return response()->json(['status' => 'error', 'message' => 'Orden no encontrada.'], 404);
+            $resultado = $this->repository->subirResultadosPDF((int)$ordenId, $request->file('archivo_pdf'));
+
+            if ($resultado['status'] !== 'success') {
+                return response()->json([
+                    'status'  => $resultado['status'],
+                    'message' => $resultado['message']
+                ], $resultado['code']);
             }
-
-            // 1. Guardar archivo PDF en disco seguro
-            $pathPdf = $request->file('archivo_pdf')->store('laboratorios/resultados', 'public');
-
-            // 2. Calcular la comisión del 5%
-            $montoTotal = floatval($orden->MontoTotal ?? 0);
-            $comisionCalculada = round($montoTotal * 0.05, 2);
-
-            DB::beginTransaction();
-
-            // 3. Actualizar la orden
-            DB::table('OrdenesLaboratorio')
-                ->where('OrdenID', $ordenId)
-                ->update([
-                    'Estado'          => 'Completada',
-                    'ArchivoPdfPath'  => $pathPdf,
-                    'ComisionMonto'   => $comisionCalculada,
-                    'FechaCompletado' => now()
-                ]);
-
-            // 4. Registrar en libro contable SaaS la comisión
-            if ($comisionCalculada > 0) {
-                DB::table('Facturacion_SaaS')->insert([
-                    'DoctorID'    => $orden->DoctorID,
-                    'Concepto'    => "Comisión 5% Laboratorio - Orden {$orden->CodigoOrden}",
-                    'Monto'       => $comisionCalculada,
-                    'FechaCargo'  => now(),
-                    'Estado'      => 'Pendiente'
-                ]);
-            }
-
-            DB::commit();
 
             return response()->json([
-                'status'           => 'success',
-                'message'          => 'Resultados adjuntados exitosamente. Orden finalizada.',
-                'comision_generada' => $comisionCalculada,
-                'pdf_url'          => Storage::url($pathPdf)
+                'status'            => 'success',
+                'message'           => $resultado['message'],
+                'comision_generada' => $resultado['comision_generada'],
+                'pdf_url'           => $resultado['pdf_url']
             ]);
         } catch (Exception $e) {
-            DB::rollBack();
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function actualizarTarifa(Request $request, $examId): JsonResponse
+    {
+        $validated = $request->validate([
+            'precio' => 'required|numeric|min:0'
+        ]);
+
+        try {
+            $exito = $this->repository->actualizarPrecioExamen((int)$examId, (float)$validated['precio']);
+
+            if (!$exito) {
+                return response()->json([
+                    'estado'  => 'error',
+                    'mensaje' => 'No se encontró el examen especificado'
+                ], 404);
+            }
+
+            return response()->json([
+                'estado'  => 'success',
+                'mensaje' => 'Precio actualizado correctamente'
+            ]);
+        } catch (Exception $e) {
+            return response()->json(['estado' => 'error', 'mensaje' => $e->getMessage()], 500);
+        }
+    }
+
+    public function crearSolicitudDigital(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'laboratorio_id'    => 'required|integer',
+            'paciente_id'       => 'nullable|integer',
+            'doctor_id'         => 'nullable|integer',
+            'consulta_id'       => 'nullable|integer',
+            'notas_clinicas'    => 'nullable|string',
+            'nombre_paciente'   => 'nullable|string',
+            'codigo_expediente' => 'nullable|string',
+            'examenes'          => 'required|array|min:1',
+            'examenes.*'        => 'integer',
+            'monto_total'       => 'required|numeric|min:0'
+        ]);
+
+        try {
+            // Toda la resolución de PacienteID y DoctorID ocurre limpiamente dentro del Repositorio
+            $resultado = $this->repository->crearSolicitudDigital($validated, $request->user());
+
+            return response()->json([
+                'status'       => 'success',
+                'message'      => 'Solicitud digital creada exitosamente.',
+                'codigo_orden' => $resultado['codigo_orden'],
+                'orden_id'     => $resultado['orden_id']
+            ], 201);
+        } catch (Exception $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Fallo al registrar la orden: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function actualizarExamenesOrden(Request $request, $ordenId): JsonResponse
+    {
+        $validated = $request->validate([
+            'examenes_ids'   => 'array',
+            'examenes_ids.*' => 'integer'
+        ]);
+
+        try {
+            $resultado = $this->repository->actualizarExamenesOrden(
+                (int)$ordenId,
+                $validated['examenes_ids'] ?? []
+            );
+
+            return response()->json($resultado, 200);
+        } catch (Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }

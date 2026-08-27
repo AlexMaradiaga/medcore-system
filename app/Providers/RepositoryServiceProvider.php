@@ -12,6 +12,7 @@ use App\Core\Specialties\Domain\Ports\SpecialtyRepositoryInterface;
 use App\Core\Clinics\Domain\Ports\ClinicRepositoryInterface;
 use App\Core\Appointments\Domain\Ports\AppointmentRepositoryInterface;
 use App\Core\SaaS\Domain\Ports\SaaSRepositoryInterface;
+use App\Core\Pharmacy\Domain\Repositories\PharmacyRepositoryInterface;
 // Infraestructura (Implementaciones SQL)
 use App\Core\Auth\Infrastructure\Repositories\SqlAuthRepository;
 use App\Core\Patients\Infrastructure\Repositories\SqlPatientRepository;
@@ -21,6 +22,7 @@ use App\Core\Clinics\Infrastructure\Repositories\SqlClinicRepository;
 use App\Core\Appointments\Infrastructure\Repositories\SqlAppointmentRepository;
 use App\Core\Laboratories\Domain\Ports\LaboratoryRepositoryInterface;
 use App\Core\Laboratories\Infrastructure\Repositories\SqlLaboratoryRepository;
+use App\Core\Pharmacy\Infrastructure\Persistence\DatabasePharmacyRepository;
 
 use App\Core\Payments\Domain\Ports\PaymentRepositoryInterface;
 use App\Core\Payments\Infrastructure\Repositories\SqlPaymentRepository;
@@ -39,6 +41,7 @@ class RepositoryServiceProvider extends ServiceProvider
         $this->app->bind(PaymentRepositoryInterface::class, SqlPaymentRepository::class);
         $this->app->bind(LaboratoryRepositoryInterface::class, SqlLaboratoryRepository::class);
         $this->app->bind(SaaSRepositoryInterface::class, SqlSaaSRepository::class);
+        $this->app->bind(PharmacyRepositoryInterface::class, DatabasePharmacyRepository::class);
     }
 
     public function boot(): void

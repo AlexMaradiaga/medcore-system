@@ -3,54 +3,81 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Core\Pharmacy\Application\UseCases\GetDashboardMetricsUseCase;
+use App\Core\Pharmacy\Application\UseCases\FindOrderByBarcodeUseCase;
+use App\Core\Pharmacy\Application\UseCases\SearchPrescriptionUseCase;
+use App\Core\Pharmacy\Application\UseCases\ChangePrescriptionStateUseCase;
+use App\Core\Pharmacy\Application\UseCases\DispensePrescriptionUseCase;
+use App\Core\Pharmacy\Domain\Repositories\PharmacyRepositoryInterface;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
+use DomainException;
 use Exception;
 
 class PharmacyController extends Controller
 {
-    /**
-     * Búsqueda de receta por Código de Canje o DNI del Paciente
-     */
-    public function buscarReceta(Request $request): JsonResponse
+    public function metrics(Request $request, GetDashboardMetricsUseCase $useCase): JsonResponse
+    {
+        try {
+            $farmaciaId = $request->query('farmacia_id') ? (int) $request->query('farmacia_id') : null;
+            $page       = (int) $request->query('page', 1);
+            $yaCanjeada = (int) $request->query('ya_canjeada', 0);
+
+            // Se pasan farmaciaId, página, items por página (10) y el estado yaCanjeada
+            $data = $useCase->execute($farmaciaId, $page, 10, $yaCanjeada);
+
+            return response()->json([
+                'status' => 'success',
+                'datos'  => $data
+            ], 200);
+        } catch (Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function scanBarcode(Request $request, FindOrderByBarcodeUseCase $useCase): JsonResponse
+    {
+        $validated = $request->validate([
+            'code' => 'required|string'
+        ]);
+
+        try {
+            $order = $useCase->execute($validated['code']);
+
+            if (!$order) {
+                return response()->json([
+                    'status'  => 'error',
+                    'message' => 'No se encontró ninguna receta o producto asociado al código ingresado.'
+                ], 404);
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'datos'  => [
+                    'id'          => $order->getId(),
+                    'patient'     => $order->getPatientName(),
+                    'status'      => $order->getStatus(),
+                    'medications' => $order->getMedications(),
+                    'barcode'     => $order->getBarcode()
+                ]
+            ], 200);
+        } catch (Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function buscarReceta(Request $request, SearchPrescriptionUseCase $useCase): JsonResponse
     {
         $validated = $request->validate([
             'criterio' => 'required|string'
         ]);
 
         try {
-            $criterio = trim($validated['criterio']);
+            $recetas = $useCase->execute($validated['criterio']);
 
-            $recetas = DB::table('Recetas as R')
-                ->join('Consultas as CON', 'R.ConsultaID', '=', 'CON.ConsultaID')
-                ->join('Citas as C', 'CON.CitaID', '=', 'C.CitaID')
-                ->join('Pacientes as P', 'C.PacienteID', '=', 'P.PacienteID')
-                ->join('Doctores as D', 'C.DoctorID', '=', 'D.DoctorID')
-                ->select(
-                    'R.RecetaID',
-                    'R.CodigoCanje',
-                    'R.NombreMedicamento',
-                    'R.Dosis',
-                    'R.Indicaciones',
-                    'R.EstadoReceta',
-                    'R.YaCanjeada',
-                    'R.FechaEmision',
-                    'R.PrecioTotal',
-                    DB::raw("P.Nombre + ' ' + P.Apellido as Paciente"),
-                    'P.DNI as PacienteDNI',
-                    'P.Telefono as PacienteTelefono',
-                    DB::raw("D.Nombre + ' ' + D.Apellido as MedicoTratante"),
-                    'C.DoctorID'
-                )
-                ->where('R.CodigoCanje', $criterio)
-                ->orWhere('P.DNI', $criterio)
-                ->orderBy('R.FechaEmision', 'DESC')
-                ->get();
-
-            if ($recetas->isEmpty()) {
+            if (empty($recetas)) {
                 return response()->json([
-                    'status' => 'error',
+                    'status'  => 'error',
                     'message' => 'No se encontraron recetas activas asociadas al criterio ingresado.'
                 ], 404);
             }
@@ -65,10 +92,7 @@ class PharmacyController extends Controller
         }
     }
 
-    /**
-     * Cambio de estado: Transiciones (Recibida por Farmacia -> Reservada)
-     */
-    public function cambiarEstado(Request $request, $id): JsonResponse
+    public function cambiarEstado(Request $request, int $id, ChangePrescriptionStateUseCase $useCase): JsonResponse
     {
         $validated = $request->validate([
             'nuevo_estado' => 'required|in:Recibida por Farmacia,Reservada',
@@ -76,35 +100,21 @@ class PharmacyController extends Controller
         ]);
 
         try {
-            $afectados = DB::table('Recetas')
-                ->where('RecetaID', $id)
-                ->where('YaCanjeada', 0)
-                ->update([
-                    'EstadoReceta' => $validated['nuevo_estado'],
-                    'FarmaciaID'   => $validated['farmacia_id']
-                ]);
-
-            if (!$afectados) {
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'La receta ya fue surtida previamente o no existe.'
-                ], 400);
-            }
+            $useCase->execute($id, $validated['nuevo_estado'], (int) $validated['farmacia_id']);
 
             return response()->json([
                 'status'  => 'success',
                 'message' => "Estado actualizado a '{$validated['nuevo_estado']}' exitosamente."
             ]);
+
+        } catch (DomainException $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
         } catch (Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * Endpoint: /api/farmacia/recetas/{id}/surtir
-     * Surtido final, deducción/confirmación e inserción de comisión del 3%
-     */
-    public function surtir(Request $request, $id): JsonResponse
+    public function surtir(Request $request, int $id, DispensePrescriptionUseCase $useCase): JsonResponse
     {
         $validated = $request->validate([
             'precio_total' => 'required|numeric|min:0',
@@ -112,65 +122,45 @@ class PharmacyController extends Controller
         ]);
 
         try {
-            $receta = DB::table('Recetas as R')
-                ->join('Consultas as CON', 'R.ConsultaID', '=', 'CON.ConsultaID')
-                ->join('Citas as C', 'CON.CitaID', '=', 'C.CitaID')
-                ->select('R.*', 'C.DoctorID')
-                ->where('R.RecetaID', $id)
-                ->first();
-
-            if (!$receta) {
-                return response()->json(['status' => 'error', 'message' => 'Receta no encontrada.'], 404);
-            }
-
-            if ($receta->YaCanjeada == 1 || $receta->EstadoReceta === 'Surtida') {
-                return response()->json([
-                    'status'  => 'warning',
-                    'message' => 'Esta receta médica ya fue surtida anteriormente.'
-                ], 400);
-            }
-
-            $precioTotal = floatval($validated['precio_total']);
-            // Cálculo de comisión fija del 3%
-            $comision3Porc = round($precioTotal * 0.03, 2);
-
-            DB::beginTransaction();
-
-            // 1. Marcar Receta como Surtida
-            DB::table('Recetas')
-                ->where('RecetaID', $id)
-                ->update([
-                    'EstadoReceta'  => 'Surtida',
-                    'YaCanjeada'    => 1,
-                    'FarmaciaID'    => $validated['farmacia_id'],
-                    'PrecioTotal'   => $precioTotal,
-                    'ComisionMonto' => $comision3Porc,
-                    'FechaSurtido'  => now()
-                ]);
-
-            // 2. Registrar la comisión del 3% a favor de MedGo+ en el libro contable SaaS
-            if ($comision3Porc > 0) {
-                DB::table('Facturacion_SaaS')->insert([
-                    'DoctorID'   => $receta->DoctorID,
-                    'EntidadID'  => $validated['farmacia_id'],
-                    'Concepto'   => "Comisión Farmacia (3%) - Receta #{$receta->CodigoCanje}",
-                    'Monto'      => $comision3Porc,
-                    'FechaCargo' => now(),
-                    'Estado'     => 'Pendiente'
-                ]);
-            }
-
-            DB::commit();
+            $result = $useCase->execute($id, (float) $validated['precio_total'], (int) $validated['farmacia_id']);
 
             return response()->json([
-                'status'           => 'success',
-                'message'          => 'Receta marcada como Surtida correctamente.',
-                'comision_medgo'   => $comision3Porc,
-                'monto_facturado'  => $precioTotal
+                'status'          => 'success',
+                'message'         => 'Receta marcada como Surtida correctamente.',
+                'comision_medgo'  => $result['comision_medgo'],
+                'monto_facturado' => $result['monto_facturado']
             ], 200);
 
+        } catch (DomainException $e) {
+            return response()->json(['status' => 'warning', 'message' => $e->getMessage()], 400);
         } catch (Exception $e) {
-            DB::rollBack();
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function surtirLote(Request $request, PharmacyRepositoryInterface $pharmacyRepository): JsonResponse
+    {
+        $validated = $request->validate([
+            'receta_ids'   => 'required|array|min:1',
+            'receta_ids.*' => 'integer|exists:Recetas,RecetaID',
+            'precio_total' => 'required|numeric|min:0.01',
+            'farmacia_id'  => 'required|integer'
+        ]);
+
+        try {
+            $recetaIds   = $validated['receta_ids'];
+            $precioTotal = (float) $validated['precio_total'];
+            $farmaciaId  = (int) $validated['farmacia_id'];
+            $comision    = $precioTotal * 0.03;
+
+            $pharmacyRepository->dispenseBulk($recetaIds, $precioTotal, $comision, $farmaciaId);
+
+            return response()->json([
+                'status'         => 'success',
+                'comision_medgo' => $comision,
+                'mensaje'        => 'Lote surtido correctamente'
+            ], 200);
+        } catch (Exception $e) {
             return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
         }
     }

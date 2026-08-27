@@ -114,11 +114,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/pacientes/auto-registro', [PatientController::class, 'autoRegistroTutor']);
     });
 
-    // RUTAS DE FARMACIA (MÓDULO OPERATIVO & MONETIZACIÓN)
+    // --- MÓDULO: FARMACIA ---
     Route::prefix('farmacia')->group(function () {
-        Route::get('recetas/buscar', [PharmacyController::class, 'buscarReceta']);
-        Route::put('recetas/{id}/estado', [PharmacyController::class, 'cambiarEstado']);
-        Route::post('recetas/{id}/surtir', [PharmacyController::class, 'surtir']);
+        Route::get('/metrics', [PharmacyController::class, 'metrics']);
+        Route::post('/scan', [PharmacyController::class, 'scanBarcode']);
+        Route::get('/recetas/buscar', [PharmacyController::class, 'buscarReceta']);
+        Route::put('/recetas/{id}/estado', [PharmacyController::class, 'cambiarEstado']);
+        Route::post('/recetas/{id}/surtir', [PharmacyController::class, 'surtir']);
+        Route::post('/recetas/surtir-lote', [PharmacyController::class, 'surtirLote']); // <-- CORREGIDO AQUÍ
     });
 
     // --- ACCESO COMPARTIDO MUTUO ---

@@ -15,7 +15,7 @@
 </head>
 <body>
     <div class="header">
-        <div class="logo">MEDCORE GLOBAL+</div>
+        <div class="logo">MEDGO+</div>
         <p>Receta Médica Digital</p>
     </div>
 
@@ -49,8 +49,9 @@
         </div>
     </div>
 
+    <!-- Actualizado pie de página -->
     <div class="footer">
-        Este documento es una receta oficial de MedCore Global. ID de Validación: {{ $data->RecetaID }}
+        Este documento es una receta oficial de MedGo+. Código de Canje: <strong>{{ $data->CodigoCanje }}</strong> | ID: {{ $data->RecetaID }}
     </div>
 </body>
 </html>

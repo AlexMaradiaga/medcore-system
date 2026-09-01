@@ -154,12 +154,16 @@ Route::middleware('auth:sanctum')->group(function () {
         , 200);
     });
 
-    // RUTAS DE LABORATORIO (Acceso Compartido Paciente/Doctor)
+    // RUTAS DE LABORATORIO (Acceso Operativo y Dashboard)
     Route::prefix('laboratorio')->group(function () {
+        // Dashboard y Métricas (Accesible por usuarios de laboratorio)
+        Route::get('/dashboard-metrics', [LaboratoryDashboardController::class, 'getDashboardData']);
+
         // Catálogo y Consultas
         Route::get('catalogo', [LaboratoryController::class, 'catalogo']);
         Route::get('paciente/{pacienteId}/ordenes', [LaboratoryController::class, 'ordenesPaciente']);
         Route::get('orden/{ordenId}/resultados', [LaboratoryController::class, 'resultadosOrden']);
+
         // Gestión de Órdenes (Operativo)
         Route::get('/ordenes', [LaboratoryController::class, 'obtenerOrdenes']);
         Route::get('/ordenes/{ordenId}/examenes', [LaboratoryController::class, 'obtenerExamenesDetalle']);
@@ -167,6 +171,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/ordenes/{id}/aceptar', [LaboratoryController::class, 'aceptarOrden']);
         Route::post('/ordenes/escanear-qr', [LaboratoryController::class, 'validarQR']);
         Route::post('/ordenes/{id}/subir-resultados', [LaboratoryController::class, 'subirResultadosPDF']);
+
         // Tarifario
         Route::put('/tarifario/{examId}', [LaboratoryController::class, 'actualizarTarifa']);
         Route::put('/ordenes/{ordenId}/actualizar-examenes', [LaboratoryController::class, 'actualizarExamenesOrden']);

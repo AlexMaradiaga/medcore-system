@@ -136,7 +136,7 @@ class LaboratoryController extends Controller
     public function subirResultadosPDF(Request $request, $ordenId): JsonResponse
     {
         $request->validate([
-            'archivo_pdf' => 'required|file|mimes:pdf|max:10240',
+            'archivo_pdf' => 'nullable|file|mimes:pdf|max:10240',
         ]);
 
         try {

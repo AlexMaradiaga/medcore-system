@@ -42,17 +42,20 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
         $ordenes = DB::table('OrdenesLaboratorio as OL')
             ->join('Pacientes as P', 'OL.PacienteID', '=', 'P.PacienteID')
             ->leftJoin('Doctores as D', 'OL.DoctorID', '=', 'D.DoctorID')
+            ->leftJoin('Entidades as E', 'OL.LaboratorioID', '=', 'E.EntidadID')
             ->whereIn('OL.PacienteID', $pacienteIds)
             ->orWhere('P.UsuarioID', $pacienteId)
             ->select(
                 'OL.OrdenID',
                 'OL.CodigoOrden',
+                'OL.LaboratorioID', // Estándar único en la base de datos
                 'OL.Estado',
                 'OL.MontoTotal',
                 'OL.ComisionMonto',
                 'OL.ArchivoPdfPath',
                 'OL.FechaOrden',
                 'OL.FechaCompletado',
+                DB::raw("COALESCE(E.NombreEntidad, 'Laboratorio Principal') as Laboratorio"),
                 DB::raw("TRIM(CONCAT(P.Nombre, ' ', COALESCE(P.Apellido, ''))) as Paciente"),
                 'P.DNI as PacienteDNI',
                 'P.Telefono as PacienteTelefono',
@@ -203,10 +206,9 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
         ];
     }
 
-    public function subirResultadosPDF(int $ordenId, UploadedFile $archivoPdf): array
+    public function subirResultadosPDF(int $ordenId, ?UploadedFile $archivoPdf = null): array
     {
         $orden = DB::table('OrdenesLaboratorio')->where('OrdenID', $ordenId)->first();
-
         if (!$orden) {
             return [
                 'status'  => 'error',
@@ -215,11 +217,14 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
             ];
         }
 
-        if (!Storage::disk('public')->exists('laboratorios/resultados')) {
-            Storage::disk('public')->makeDirectory('laboratorios/resultados');
+        $pathPdf = null;
+        if ($archivoPdf) {
+            if (!Storage::disk('public')->exists('laboratorios/resultados')) {
+                Storage::disk('public')->makeDirectory('laboratorios/resultados');
+            }
+            $pathPdf = $archivoPdf->store('laboratorios/resultados', 'public');
         }
 
-        $pathPdf = $archivoPdf->store('laboratorios/resultados', 'public');
         $montoTotal = floatval($orden->MontoTotal ?? 0);
         $comisionCalculada = round($montoTotal * 0.05, 2);
 
@@ -229,7 +234,7 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
                 ->where('OrdenID', $ordenId)
                 ->update([
                     'Estado'          => 'Completada',
-                    'ArchivoPdfPath'  => $pathPdf,
+                    'ArchivoPdfPath'  => $pathPdf ?? $orden->ArchivoPdfPath,
                     'ComisionMonto'   => $comisionCalculada,
                     'FechaCompletado' => now()
                 ]);
@@ -258,9 +263,9 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
             return [
                 'status'            => 'success',
                 'code'              => 200,
-                'message'           => 'Resultados adjuntados exitosamente. Orden finalizada.',
+                'message'           => 'Orden completada exitosamente.',
                 'comision_generada' => $comisionCalculada,
-                'pdf_url'           => Storage::url($pathPdf)
+                'pdf_url'           => $pathPdf ? Storage::url($pathPdf) : null
             ];
         } catch (Exception $e) {
             DB::rollBack();

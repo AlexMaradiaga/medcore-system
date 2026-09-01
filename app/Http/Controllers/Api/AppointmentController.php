@@ -92,8 +92,6 @@ class AppointmentController extends Controller
         }
     }
 
-
-
     public function getHistoryByPatient($id): \Illuminate\Http\JsonResponse
     {
         try {
@@ -121,7 +119,6 @@ class AppointmentController extends Controller
                     \Illuminate\Support\Facades\DB::raw("COALESCE(CONCAT(d.Nombre, ' ', d.Apellido), 'Dr. Por Asignar') as Doctor"),
                     \Illuminate\Support\Facades\DB::raw("COALESCE(e.NombreEntidad, 'Clínica Principal') as Clinica"),
                     'con.Diagnostico',
-                    // 👇 Evita el choque si 'Notas' no existe en 'Consultas'
                     \Illuminate\Support\Facades\DB::raw("NULL as Sintomas")
                 ])
                 ->orderBy('c.FechaHora', 'DESC')
@@ -137,7 +134,6 @@ class AppointmentController extends Controller
             ], 500);
         }
     }
-
 
     public function getPrescriptionsByPatient($usuarioId): JsonResponse
     {
@@ -169,9 +165,14 @@ class AppointmentController extends Controller
                 return response()->json(['error' => 'El folio de la receta proporcionado no es válido'], 400);
             }
 
-            $consulta = \Illuminate\Support\Facades\DB::selectOne("SELECT ConsultaID FROM Recetas WHERE RecetaID = ?", [$recetaId]);
+            // Selecciona ConsultaID y CodigoCanje directamente de Recetas
+            $recetaInfo = \Illuminate\Support\Facades\DB::selectOne("
+                SELECT ConsultaID, CodigoCanje
+                FROM Recetas
+                WHERE RecetaID = ?
+            ", [$recetaId]);
 
-            if (!$consulta) {
+            if (!$recetaInfo) {
                 return response()->json(['error' => 'Receta no encontrada'], 404);
             }
 
@@ -189,13 +190,13 @@ class AppointmentController extends Controller
                 JOIN Especialidades ESP ON D.EspecialidadID = ESP.EspecialidadID
                 JOIN Pacientes P ON C.PacienteID = P.PacienteID
                 WHERE CON.ConsultaID = ?
-            ", [$consulta->ConsultaID]);
+            ", [$recetaInfo->ConsultaID]);
 
             $medicamentos = \Illuminate\Support\Facades\DB::select("
                 SELECT NombreMedicamento, Dosis, Indicaciones
                 FROM Recetas
                 WHERE ConsultaID = ?
-            ", [$consulta->ConsultaID]);
+            ", [$recetaInfo->ConsultaID]);
 
             $textoMedicamentos = "";
             foreach ($medicamentos as $m) {
@@ -203,6 +204,8 @@ class AppointmentController extends Controller
             }
 
             $datos->DetalleMedicamentos = $textoMedicamentos;
+            // Asigna el código de canje para evitar undefined property en el template Blade
+            $datos->CodigoCanje = $recetaInfo->CodigoCanje ?? "REC-{$recetaId}";
 
             $pdf = Pdf::loadView('pdf.receta', ['data' => $datos]);
 

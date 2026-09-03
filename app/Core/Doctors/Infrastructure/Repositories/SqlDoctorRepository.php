@@ -190,7 +190,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             $data['presupuesto_total'] = (float)$data['presupuesto_total'];
         }
 
-        // Envolvemos todo en una transacción como lo tenías en el otro repo
         return DB::transaction(function () use ($data, $cita) {
             $payloadJsonStr = json_encode($data);
 

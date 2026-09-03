@@ -369,6 +369,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
                 U_Doc.Email as EmailDoctor,
                 C.EstadoCita,
                 P.Aseguradora,
+                P.NumeroPoliza,
                 P.NombreContactoEmergencia AS NombreContactoEmergencia,
                 P.TelefonoContactoEmergencia AS TelefonoContactoEmergencia,
                 P.NombreContactoEmergencia AS nombre_contacto_emergencia,

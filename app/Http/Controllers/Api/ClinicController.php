@@ -68,19 +68,24 @@ class ClinicController extends Controller
             $entidades = \Illuminate\Support\Facades\DB::table('Entidades')
                 ->select(
                     'EntidadID',
-                    'NombreEntidad as Nombre',
+                    'NombreEntidad', // Se mantiene el nombre real de la columna para el Frontend
                     'TipoEntidad',
                     'Direccion',
                     'Telefono'
                 )
                 ->where('Estado', 1)
+                ->where('TipoEntidad', function ($query) {
+                    $query->select('NombreRol')
+                        ->from('Roles')
+                        ->where('NombreRol', 'Laboratorio');
+                })
                 ->get();
 
             return response()->json($entidades, 200);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Error al obtener instituciones: ' . $e->getMessage()
+                'message' => 'Error al obtener laboratorios: ' . $e->getMessage()
             ], 500);
         }
     }

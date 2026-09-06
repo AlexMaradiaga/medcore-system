@@ -85,7 +85,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                     'Nombre'               => $datos['nombre'],
                     'Apellido'             => $datos['apellido'],
                     'NumeroColegiado'      => $datos['numero_colegiado'],
-
                     'Nacionalidad'         => $datos['nacionalidad'] ?? 'Hondureña',
                     'HablaIngles'          => $hablaIngles,
                     'OtrosIdiomas'         => $datos['otros_idiomas'] ?? null,
@@ -106,8 +105,7 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
         });
     }
 
-    public function getAllActive(array $filters = []): array
-    {
+    public function getAllActive(array $filters = []): array {
         $query = DB::table('Doctores as D')
             ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
             ->select(
@@ -125,7 +123,48 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                 'D.DisponibleDomicilio',
                 'D.Latitud',
                 'D.Longitud',
-                'D.DireccionConsultorio'
+                'D.DireccionConsultorio',
+                DB::raw("
+                    CASE
+                        -- 1. Verifica el horario configurado para hoy con tu fórmula exacta (+1)
+                        WHEN EXISTS (
+                            SELECT 1 FROM Doctor_Horarios H WITH (NOLOCK)
+                            WHERE H.DoctorID = D.DoctorID
+                            AND H.DiaSemana = ((DATEDIFF(dd, 0, GETDATE()) % 7) + 1)
+                            AND H.Estado = 1
+                        )
+                        -- 2. Descarta si existe un bloqueo activo en el instante actual de la BD
+                        AND NOT EXISTS (
+                            SELECT 1 FROM Doctor_Bloqueos B WITH (NOLOCK)
+                            WHERE B.DoctorID = D.DoctorID
+                            AND GETDATE() BETWEEN B.FechaInicio AND B.FechaFin
+                            AND B.Estado = 1
+                        ) THEN 1 ELSE 0
+                    END as DisponibleAhora
+                "),
+                DB::raw("
+                    CASE
+                        -- Muestra 'Fuera de Servicio' si el médico está bloqueado en este momento
+                        WHEN EXISTS (
+                            SELECT 1 FROM Doctor_Bloqueos B WITH (NOLOCK)
+                            WHERE B.DoctorID = D.DoctorID
+                            AND GETDATE() BETWEEN B.FechaInicio AND B.FechaFin
+                            AND B.Estado = 1
+                        ) THEN 'Fuera de Servicio'
+                        -- De lo contrario, calcula el rango de horario habitual
+                        ELSE (
+                            SELECT TOP 1 CONCAT(
+                                FORMAT(CAST(HoraInicio AS datetime), 'hh:mm tt'),
+                                ' - ',
+                                FORMAT(CAST(HoraFin AS datetime), 'hh:mm tt')
+                            )
+                            FROM Doctor_Horarios H WITH (NOLOCK)
+                            WHERE H.DoctorID = D.DoctorID
+                            AND H.DiaSemana = ((DATEDIFF(dd, 0, GETDATE()) % 7) + 1)
+                            AND H.Estado = 1
+                        )
+                    END as horario_resumen
+                ")
             )
             ->where('D.Estado', 1);
 
@@ -143,7 +182,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
 
         return $query->get()->toArray();
     }
-
     public function getFullHistory(int $pacienteId, int $doctorId): array {
         $results = DB::select("EXEC sp_ObtenerHistorialClinico ?, ?", [$pacienteId, $doctorId]);
 
@@ -193,7 +231,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
         return DB::transaction(function () use ($data, $cita) {
             $payloadJsonStr = json_encode($data);
 
-            // 1. Finalizar la consulta actual
             DB::statement("EXEC sp_FinalizarConsulta ?, ?, ?, ?, ?", [
                 $data['cita_id'],
                 $data['diagnostico'],
@@ -202,7 +239,6 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                 'Completada'
             ]);
 
-            // 2. Lógica para crear la cita de seguimiento automatizada
             $crearSeguimiento = filter_var($data['crear_seguimiento'] ?? false, FILTER_VALIDATE_BOOLEAN);
             $fechaSeguimiento = $data['seguimiento_fecha_hora'] ?? null;
 
@@ -215,7 +251,7 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                     'EntidadID'            => $cita->EntidadID,
                     'FechaHora'            => $fechaSeguimiento,
                     'Motivo'               => $motivoSeguimiento,
-                    'EstadoCita'           => 'Confirmada', // Estado confirmada para que aparezca en agenda
+                    'EstadoCita'           => 'Confirmada',
                     'Estado'               => 1,
                     'Sintomas'             => 'Seguimiento clínico automatizado.',
                     'Alergias'             => $cita->Alergias ?? null,
@@ -225,5 +261,123 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
 
             return true;
         });
+    }
+
+    public function guardarHorarios(int $doctorId, array $horarios): bool {
+        $horariosLimpios = array_map(function ($h) {
+            return [
+                'dia_semana'       => (int)$h['dia_semana'],
+                'hora_inicio'      => strlen($h['hora_inicio']) === 5 ? $h['hora_inicio'] . ':00' : $h['hora_inicio'],
+                'hora_fin'         => strlen($h['hora_fin']) === 5 ? $h['hora_fin'] . ':00' : $h['hora_fin'],
+                'duracion_minutos' => (int)($h['duracion_minutos'] ?? 30),
+            ];
+        }, $horarios);
+
+        try {
+            return DB::transaction(function () use ($doctorId, $horariosLimpios) {
+                $diasEnviados = array_column($horariosLimpios, 'dia_semana');
+
+                DB::table('Doctor_Horarios')
+                    ->where('DoctorID', $doctorId)
+                    ->whereNotIn('DiaSemana', $diasEnviados)
+                    ->update(['Estado' => 0]);
+
+                foreach ($horariosLimpios as $h) {
+                    DB::table('Doctor_Horarios')->updateOrInsert(
+                        [
+                            'DoctorID'  => $doctorId,
+                            'DiaSemana' => $h['dia_semana'],
+                        ],
+                        [
+                            'HoraInicio'          => $h['hora_inicio'],
+                            'HoraFin'             => $h['hora_fin'],
+                            'DuracionCitaMinutos' => $h['duracion_minutos'],
+                            'Estado'              => 1,
+                        ]
+                    );
+                }
+
+                return true;
+            });
+        } catch (\Exception $e) {
+            \Log::error("Error en guardarHorarios DoctorID {$doctorId}: " . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    public function registrarBloqueo(int $doctorId, array $datos): bool {
+        return DB::table('Doctor_Bloqueos')->insert([
+            'DoctorID'    => $doctorId,
+            'FechaInicio' => $datos['fecha_inicio'],
+            'FechaFin'    => $datos['fecha_fin'],
+            'Motivo'      => $datos['motivo'] ?? 'No disponible',
+            'Estado'      => 1
+        ]);
+    }
+
+    public function eliminarBloqueo(int $bloqueoId): bool {
+        return DB::table('Doctor_Bloqueos')
+            ->where('BloqueoID', $bloqueoId)
+            ->update(['Estado' => 0]) > 0;
+    }
+
+    public function obtenerDisponibilidad(int $doctorId): array {
+        $horarios = DB::table('Doctor_Horarios')->where('DoctorID', $doctorId)->where('Estado', 1)->get();
+        $bloqueos = DB::table('Doctor_Bloqueos')->where('DoctorID', $doctorId)->where('Estado', 1)->get();
+
+        return [
+            'horarios' => $horarios,
+            'bloqueos' => $bloqueos
+        ];
+    }
+
+    public function obtenerPorClinica(int $entidadId): array {
+        return DB::table('Doctores as D')
+            ->join('Usuarios as U', 'D.UsuarioID', '=', 'U.UsuarioID')
+            ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
+            ->leftJoin('Servicios_Medicos as SM', function($join) {
+                $join->on('D.DoctorID', '=', 'SM.DoctorID')
+                     ->where('SM.NombreServicio', 'like', '%Consulta%');
+            })
+            ->select(
+                'D.DoctorID',
+                'D.Nombre',
+                'D.Apellido',
+                'E.NombreEspecialidad as Especialidad',
+                'U.EntidadID',
+                'D.RutaFoto as Foto',
+                'D.EsVerificado',
+                'D.Estado',
+                'D.Nacionalidad',
+                'D.HablaIngles',
+                'D.OtrosIdiomas',
+                'D.DisponibleDomicilio',
+                'D.Latitud',
+                'D.Longitud',
+                'D.DireccionConsultorio',
+                DB::raw('ISNULL(MAX(SM.Precio), 90) as CostoConsulta')
+            )
+            ->where('U.EntidadID', $entidadId)
+            ->where('D.Estado', 1)
+            ->groupBy(
+                'D.DoctorID', 'D.Nombre', 'D.Apellido', 'E.NombreEspecialidad',
+                'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado',
+                'D.Nacionalidad', 'D.HablaIngles', 'D.OtrosIdiomas',
+                'D.DisponibleDomicilio', 'D.Latitud', 'D.Longitud', 'D.DireccionConsultorio'
+            )
+            ->get()
+            ->toArray();
+    }
+
+    public function guardarUbicacionConsultorio(array $datos): bool {
+        return DB::table('Doctores')
+            ->where('DoctorID', $datos['doctor_id'])
+            ->update([
+                'Latitud'              => $datos['latitud'],
+                'Longitud'             => $datos['longitud'],
+                'DireccionConsultorio' => $datos['direccion_consultorio'],
+                'HablaIngles'          => $datos['habla_ingles'] ?? 0,
+                'DisponibleDomicilio'  => $datos['disponible_domicilio'] ?? 0,
+            ]) > 0;
     }
 }

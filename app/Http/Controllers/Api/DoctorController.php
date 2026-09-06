@@ -95,41 +95,7 @@ class DoctorController extends Controller
     public function getByClinic($entidadId): JsonResponse
     {
         try {
-            $doctores = \Illuminate\Support\Facades\DB::table('Doctores as D')
-                ->join('Usuarios as U', 'D.UsuarioID', '=', 'U.UsuarioID')
-                ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
-                ->leftJoin('Servicios_Medicos as SM', function($join) {
-                    $join->on('D.DoctorID', '=', 'SM.DoctorID')
-                         ->where('SM.NombreServicio', 'like', '%Consulta%');
-                })
-                ->select(
-                    'D.DoctorID',
-                    'D.Nombre',
-                    'D.Apellido',
-                    'E.NombreEspecialidad as Especialidad',
-                    'U.EntidadID',
-                    'D.RutaFoto as Foto',
-                    'D.EsVerificado',
-                    'D.Estado',
-                    'D.Nacionalidad',
-                    'D.HablaIngles',
-                    'D.OtrosIdiomas',
-                    'D.DisponibleDomicilio',
-                    'D.Latitud',
-                    'D.Longitud',
-                    'D.DireccionConsultorio',
-                    \Illuminate\Support\Facades\DB::raw('ISNULL(MAX(SM.Precio), 90) as CostoConsulta')
-                )
-                ->where('U.EntidadID', $entidadId)
-                ->where('D.Estado', 1)
-                ->groupBy(
-                    'D.DoctorID', 'D.Nombre', 'D.Apellido', 'E.NombreEspecialidad',
-                    'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado',
-                    'D.Nacionalidad', 'D.HablaIngles', 'D.OtrosIdiomas',
-                    'D.DisponibleDomicilio', 'D.Latitud', 'D.Longitud', 'D.DireccionConsultorio'
-                )
-                ->get();
-
+            $doctores = $this->repository->obtenerPorClinica((int)$entidadId);
             return response()->json($doctores, 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -138,30 +104,91 @@ class DoctorController extends Controller
             ], 500);
         }
     }
+
     public function guardarUbicacionConsultorio(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'doctor_id'            => 'required|integer',
-            'latitud'              => 'required|numeric',
-            'longitud'             => 'required|numeric',
-            'direccion_consultorio' => 'required|string|max:255',
-            'habla_ingles'         => 'nullable|boolean',
-            'disponible_domicilio' => 'nullable|boolean',
-        ]);
-
-        DB::table('Doctores')
-            ->where('DoctorID', $validated['doctor_id'])
-            ->update([
-                'Latitud'              => $validated['latitud'],
-                'Longitud'             => $validated['longitud'],
-                'DireccionConsultorio' => $validated['direccion_consultorio'],
-                'HablaIngles'          => $validated['habla_ingles'] ?? 0,
-                'DisponibleDomicilio'  => $validated['disponible_domicilio'] ?? 0,
+        try {
+            $validated = $request->validate([
+                'doctor_id'             => 'required|integer',
+                'latitud'               => 'required|numeric',
+                'longitud'              => 'required|numeric',
+                'direccion_consultorio' => 'required|string|max:255',
+                'habla_ingles'          => 'nullable|boolean',
+                'disponible_domicilio'  => 'nullable|boolean',
             ]);
 
-        return response()->json([
-            'status'  => 'success',
-            'message' => 'Ubicación y configuración del consultorio actualizadas correctamente.'
-        ]);
+            $this->repository->guardarUbicacionConsultorio($validated);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Ubicación y configuración del consultorio actualizadas correctamente.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function guardarHorarios(Request $request, $id): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'horarios'                  => 'required|array',
+                'horarios.*.dia_semana'     => 'required|integer|min:1|max:7',
+                'horarios.*.hora_inicio'    => 'required|string',
+                'horarios.*.hora_fin'       => 'required|string',
+                'horarios.*.duracion_minutos' => 'nullable|integer'
+            ]);
+
+            $this->repository->guardarHorarios((int)$id, $validated['horarios']);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Horarios actualizados correctamente'
+            ], 200);
+
+        } catch (\Exception $e) {
+            \Log::error("Error guardando horarios: " . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function crearBloqueo(Request $request, $id): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'fecha_inicio' => 'required|date',
+                'fecha_fin'    => 'required|date|after_or_equal:fecha_inicio',
+                'motivo'       => 'nullable|string|max:255'
+            ]);
+
+            $this->repository->registrarBloqueo((int)$id, $validated);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Bloqueo o permiso temporal registrado con éxito'
+            ], 201);
+        } catch (\Exception $e) {
+            \Log::error("Error creando bloqueo DoctorID {$id}: " . $e->getMessage());
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function eliminarBloqueo($id): JsonResponse
+    {
+        try {
+            $this->repository->eliminarBloqueo((int)$id);
+
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Bloqueo eliminado correctamente'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    public function obtenerDisponibilidad($doctorId): JsonResponse
+    {
+        return response()->json($this->repository->obtenerDisponibilidad((int)$doctorId));
     }
 }

@@ -16,7 +16,9 @@ use App\Http\Controllers\Api\{
     LaboratoryController,
     ClinicDashboardController,
     LaboratoryDashboardController,
-    PharmacyController
+    PharmacyController,
+    EntityScheduleController,
+    EntityController
 };
 
 // RUTAS PÚBLICAS
@@ -93,11 +95,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/doctor/diagnosticos/buscar', [HistoryController::class, 'buscarDiagnosticosCIE11']);
         Route::get('/doctor/catalogo-examen-fisico', [AppointmentController::class, 'getCatalogoExamenFisico']);
 
-        Route::get('/doctor/catalogo-precios', [PaymentController::class, 'obtenerCatalogoPrecios']);
+
+        Route::post('/doctor/catalogo-precios', [PaymentController::class, 'guardarCatalogoYUbicacion']);
+        Route::get('/doctor/perfil-ubicacion', [PaymentController::class, 'obtenerPerfilUbicacion']);
         Route::get('/doctor/consulta/facturacion-detalle', [HistoryController::class, 'obtenerDetalleParaFacturacion']);
         Route::post('/pagos/procesar', [PaymentController::class, 'registrarPago']);
         //dashOdontologa
         Route::middleware('auth:sanctum')->get('/medico/dashboard-mensual', [HistoryController::class, 'obtenerMiniDashboardMensual']);
+        // Gestión disponibilidad con ID de doctor (Dentro del grupo de middleware 'role:Doctor')
+        Route::get('doctores/{id}/disponibilidad', [DoctorController::class, 'obtenerDisponibilidad']);
+        Route::post('doctores/{id}/horarios', [DoctorController::class, 'guardarHorarios']);
+        Route::post('doctores/{id}/bloqueos', [DoctorController::class, 'crearBloqueo']);
+        Route::delete('doctor/bloqueos/{id}', [DoctorController::class, 'eliminarBloqueo']);
     });
 
     // --- ROL: SOLO PACIENTES ---
@@ -131,7 +140,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('citas/{id}', [AppointmentController::class, 'destroy']);
     Route::put('especialidades/{id}/desactivar', [SpecialtyController::class, 'desactivar']);
     Route::put('clinicas/{id}/desactivar', [ClinicController::class, 'desactivar']);
-
+    Route::get('/doctor/catalogo-precios', [PaymentController::class, 'obtenerCatalogoPrecios']);
     // Rutas de Facturación y Pagos:
     Route::get('/doctor/consulta/facturacion-detalle', [HistoryController::class, 'obtenerDetalleParaFacturacion']);
     Route::post('/pagos/procesar', [PaymentController::class, 'registrarPago']);
@@ -182,4 +191,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // 2. Ruta para obtener los doctores que pertenecen a una clínica específica
     Route::get('/doctores/entidad/{id}', [DoctorController::class, 'getByClinic']);
+    Route::get('/doctores/entidad/{id}', [DoctorController::class, 'getByClinic']);
+    // Ruta Pública/Paciente para consultar slots de citas disponibles
+    Route::get('doctores/{id}/slots-disponibles', [DoctorController::class, 'obtenerSlotsDisponibles']);
+    //Horarios Disponibles Lab y Farmacias
+    Route::get('/entidades/{entityId}/horarios', [EntityScheduleController::class, 'index']);
+    Route::put('/entidades/{entityId}/horarios', [EntityScheduleController::class, 'update']);
+    //Entidades existentes
+    Route::get('/instituciones', [EntityController::class, 'index']);
 });

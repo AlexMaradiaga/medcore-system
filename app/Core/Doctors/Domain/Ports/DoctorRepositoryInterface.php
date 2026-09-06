@@ -18,4 +18,16 @@ interface DoctorRepositoryInterface {
     public function obtenerMisPacientesAtendidos(int $doctorId): array;
 
     public function complete(array $data): bool;
+
+    public function guardarHorarios(int $doctorId, array $horarios): bool;
+
+    public function registrarBloqueo(int $doctorId, array $datos): bool;
+
+    public function eliminarBloqueo(int $bloqueoId): bool;
+
+    public function obtenerDisponibilidad(int $doctorId): array;
+
+    public function obtenerPorClinica(int $entidadId): array;
+
+    public function guardarUbicacionConsultorio(array $datos): bool;
 }

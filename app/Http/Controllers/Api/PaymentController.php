@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Core\Payments\Domain\Ports\PaymentRepositoryInterface;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 
 class PaymentController extends Controller
 {
@@ -14,37 +13,22 @@ class PaymentController extends Controller
         private PaymentRepositoryInterface $repository
     ) {}
 
-    public function obtenerCatalogoPrecios()
+    public function obtenerCatalogoPrecios(Request $request): JsonResponse
     {
-        $doctorId = DB::table('Doctores')->where('UsuarioID', auth()->id())->value('DoctorID');
+        $doctorId = $request->query('doctor_id') ? (int) $request->query('doctor_id') : null;
+        $precios = $this->repository->obtenerCatalogoPrecios($doctorId, auth()->id());
 
-        $precios = DB::select("EXEC sp_ObtenerPreciosDoctor @DoctorID = ?", [$doctorId]);
         return response()->json($precios);
     }
 
-    public function registrarPago(Request $request)
+    public function obtenerPerfilUbicacion(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            'cita_id'     => 'required|integer',
-            'servicio_id' => 'required|integer',
-            'monto'       => 'required|numeric',
-            'metodo'      => 'required|string',
-            'referencia'  => 'nullable|string'
-        ]);
+        $doctorId = $request->query('doctor_id') ? (int) $request->query('doctor_id') : null;
+        $perfil = $this->repository->obtenerPerfilUbicacion($doctorId, auth()->id());
 
-        DB::statement("EXEC sp_ProcesarPago ?, ?, ?, ?, ?, ?, ?, ?", [
-            auth()->id(),
-            (int) $data['servicio_id'],
-            (int) $data['cita_id'],
-            'CONSULTA',
-            (float) $data['monto'],
-            $data['metodo'],
-            $data['referencia'] ?? 'N/A',
-            'PROCESADO'
-        ]);
-
-        return response()->json(['status' => 'success']);
+        return response()->json($perfil);
     }
+
     public function guardarCatalogoYUbicacion(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -59,32 +43,31 @@ class PaymentController extends Controller
             'disponible_domicilio'  => 'nullable|boolean',
         ]);
 
-        $doctorId = $validated['doctor_id']
-            ?? DB::table('Doctores')->where('UsuarioID', auth()->id())->value('DoctorID');
-
-        DB::transaction(function () use ($doctorId, $validated) {
-            // 1. Actualizar catálogo dinámico de servicios
-            foreach ($validated['servicios'] as $serv) {
-                DB::table('Servicios_Medicos')
-                    ->where('ServicioID', $serv['ServicioID'])
-                    ->where('DoctorID', $doctorId)
-                    ->update(['Precio' => $serv['Precio']]);
-            }
-
-            DB::table('Doctores')
-                ->where('DoctorID', $doctorId)
-                ->update([
-                    'DireccionConsultorio' => $validated['direccion_consultorio'] ?? null,
-                    'Latitud'              => $validated['latitud'] ?? null,
-                    'Longitud'             => $validated['longitud'] ?? null,
-                    'HablaIngles'          => filter_var($validated['habla_ingles'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0,
-                    'DisponibleDomicilio'  => filter_var($validated['disponible_domicilio'] ?? false, FILTER_VALIDATE_BOOLEAN) ? 1 : 0,
-                ]);
-        });
+        $this->repository->guardarCatalogoYUbicacion($validated, auth()->id());
 
         return response()->json([
             'status'  => 'success',
             'message' => 'Tarifas y datos del consultorio actualizados correctamente.'
         ]);
+    }
+
+    public function registrarPago(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'cita_id'     => 'required|integer',
+            'servicio_id' => 'required|integer',
+            'monto'       => 'required|numeric',
+            'metodo'      => 'required|string',
+            'referencia'  => 'nullable|string'
+        ]);
+
+        $this->repository->procesarPago([
+            'consulta_id'         => $data['cita_id'],
+            'monto'               => $data['monto'], // <-- ¡PASAR MONTO!
+            'metodo_pago'         => $data['metodo'],
+            'referencia_pasarela' => $data['referencia'] ?? 'N/A'
+        ]);
+
+        return response()->json(['status' => 'success']);
     }
 }

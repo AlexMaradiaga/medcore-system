@@ -1,13 +1,11 @@
 <?php
 
 namespace App\Http\Controllers\Api;
-use Illuminate\Support\Facades\Log;
+
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Core\Appointments\Domain\Ports\AppointmentRepositoryInterface;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\DB;
 
 class AppointmentController extends Controller
 {
@@ -29,7 +27,7 @@ class AppointmentController extends Controller
                 'telefono'                     => 'nullable|string',
                 'alergias'                     => 'nullable|string',
                 'aseguradora'                  => 'nullable|string',
-                'numero_poliza'                => 'nullable|string',
+                'NumeroPoliza'                => 'nullable|string',
                 'nombre_contacto_emergencia'   => 'nullable|string',
                 'telefono_contacto_emergencia' => 'nullable|string',
                 'medicamentos_actuales'        => 'nullable|string',
@@ -40,19 +38,25 @@ class AppointmentController extends Controller
                 'paciente_id'                  => 'nullable|integer'
             ]);
 
-            // Asignación de UsuarioID de la sesión si no se envía explícitamente
             $validated['UsuarioID'] = $validated['UsuarioID']
                 ?? $validated['usuario_id']
                 ?? $request->user()?->UsuarioID
                 ?? $request->user()?->id;
 
-            $this->repository->create($validated);
+            $citaId = $this->repository->create($validated);
 
             return response()->json([
                 'status'  => 'success',
-                'message' => 'Cita agendada correctamente en MedGo+'
+                'message' => 'Cita agendada correctamente en MedGo+',
+                'cita_id' => $citaId
             ], 201);
 
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => 'Error de validación en la solicitud.',
+                'errors'  => $e->errors()
+            ], 400);
         } catch (\Throwable $e) {
             return response()->json([
                 'status'  => 'error',
@@ -81,51 +85,22 @@ class AppointmentController extends Controller
         try {
             $this->repository->cancel((int)$id, "Cancelada desde el portal");
             return response()->json([
-                'status' => 'success',
+                'status'  => 'success',
                 'message' => 'Cita cancelada correctamente'
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'No se pudo cancelar la cita: ' . $e->getMessage()
             ], 400);
         }
     }
 
-    public function getHistoryByPatient($id): \Illuminate\Http\JsonResponse
+    public function getHistoryByPatient($id): JsonResponse
     {
         try {
-            $paramId = (int) $id;
-
-            $citas = \Illuminate\Support\Facades\DB::table('Citas as c')
-                ->join('Pacientes as p', 'c.PacienteID', '=', 'p.PacienteID')
-                ->leftJoin('Doctores as d', 'c.DoctorID', '=', 'd.DoctorID')
-                ->leftJoin('Entidades as e', 'c.EntidadID', '=', 'e.EntidadID')
-                ->leftJoin('Consultas as con', 'c.CitaID', '=', 'con.CitaID')
-                ->where(function ($query) use ($paramId) {
-                    $query->where('p.PacienteID', $paramId)
-                        ->orWhere('p.UsuarioID', $paramId);
-                })
-                ->select([
-                    'c.CitaID',
-                    'c.CitaID as Folio',
-                    'c.FechaHora',
-                    'c.EstadoCita',
-                    'c.EstadoCita as Estado',
-                    \Illuminate\Support\Facades\DB::raw("'General' as TipoCita"),
-                    'c.Motivo',
-                    'p.PacienteID',
-                    'p.Nombre as PacienteNombre',
-                    \Illuminate\Support\Facades\DB::raw("COALESCE(CONCAT(d.Nombre, ' ', d.Apellido), 'Dr. Por Asignar') as Doctor"),
-                    \Illuminate\Support\Facades\DB::raw("COALESCE(e.NombreEntidad, 'Clínica Principal') as Clinica"),
-                    'con.Diagnostico',
-                    \Illuminate\Support\Facades\DB::raw("NULL as Sintomas")
-                ])
-                ->orderBy('c.FechaHora', 'DESC')
-                ->get();
-
+            $citas = $this->repository->getHistoryByPatient((int)$id);
             return response()->json($citas, 200);
-
         } catch (\Throwable $e) {
             return response()->json([
                 'status'  => 'error',
@@ -145,75 +120,31 @@ class AppointmentController extends Controller
         }
     }
 
-    public function getExamsByPatient($usuarioId): \Illuminate\Http\JsonResponse
+    public function getExamsByPatient($usuarioId): JsonResponse
     {
         try {
             $examenSistemas = $this->repository->getExams((int)$usuarioId);
             return response()->json($examenSistemas, 200);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => 'Error al obtener examen físico: ' . $e->getMessage()
             ], 500);
         }
     }
 
-    public function descargarReceta($recetaId): \Illuminate\Http\Response | JsonResponse
+    public function descargarReceta($recetaId)
     {
         try {
-            if (!$recetaId || $recetaId === 'undefined') {
-                return response()->json(['error' => 'El folio de la receta proporcionado no es válido'], 400);
-            }
-
-            // Selecciona ConsultaID y CodigoCanje directamente de Recetas
-            $recetaInfo = \Illuminate\Support\Facades\DB::selectOne("
-                SELECT ConsultaID, CodigoCanje
-                FROM Recetas
-                WHERE RecetaID = ?
-            ", [$recetaId]);
-
-            if (!$recetaInfo) {
-                return response()->json(['error' => 'Receta no encontrada'], 404);
-            }
-
-            $datos = \Illuminate\Support\Facades\DB::selectOne("
-                SELECT
-                    CON.ConsultaID as RecetaID,
-                    C.FechaHora,
-                    D.Nombre + ' ' + D.Apellido as Doctor,
-                    ESP.NombreEspecialidad as Especialidad,
-                    P.Nombre + ' ' + P.Apellido as Paciente,
-                    P.Edad
-                FROM Consultas CON
-                JOIN Citas C ON CON.CitaID = C.CitaID
-                JOIN Doctores D ON C.DoctorID = D.DoctorID
-                JOIN Especialidades ESP ON D.EspecialidadID = ESP.EspecialidadID
-                JOIN Pacientes P ON C.PacienteID = P.PacienteID
-                WHERE CON.ConsultaID = ?
-            ", [$recetaInfo->ConsultaID]);
-
-            $medicamentos = \Illuminate\Support\Facades\DB::select("
-                SELECT NombreMedicamento, Dosis, Indicaciones
-                FROM Recetas
-                WHERE ConsultaID = ?
-            ", [$recetaInfo->ConsultaID]);
-
-            $textoMedicamentos = "";
-            foreach ($medicamentos as $m) {
-                $textoMedicamentos .= "• " . $m->NombreMedicamento . " | Dosis: " . $m->Dosis . " | Indicaciones: " . $m->Indicaciones . "\n";
-            }
-
-            $datos->DetalleMedicamentos = $textoMedicamentos;
-            // Asigna el código de canje para evitar undefined property en el template Blade
-            $datos->CodigoCanje = $recetaInfo->CodigoCanje ?? "REC-{$recetaId}";
-
-            $pdf = Pdf::loadView('pdf.receta', ['data' => $datos]);
+            $pdf = $this->repository->descargarReceta($recetaId);
 
             return $pdf->download("Receta_{$recetaId}.pdf", [
-                'Content-Type' => 'application/pdf',
+                'Content-Type'                  => 'application/pdf',
                 'Access-Control-Expose-Headers' => 'Content-Disposition'
             ]);
 
+        } catch (\InvalidArgumentException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
         } catch (\Exception $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
@@ -226,7 +157,7 @@ class AppointmentController extends Controller
             return response()->json($stats);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => $e->getMessage()
             ], 400);
         }
@@ -239,7 +170,7 @@ class AppointmentController extends Controller
             return response()->json($appointments);
         } catch (\Exception $e) {
             return response()->json([
-                'status' => 'error',
+                'status'  => 'error',
                 'message' => $e->getMessage()
             ], 400);
         }

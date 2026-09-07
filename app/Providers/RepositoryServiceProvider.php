@@ -15,6 +15,7 @@ use App\Core\SaaS\Domain\Ports\SaaSRepositoryInterface;
 use App\Core\Pharmacy\Domain\Repositories\PharmacyRepositoryInterface;
 use App\Core\Payments\Domain\Ports\PaymentRepositoryInterface;
 use App\Core\Entity\Domain\EntityScheduleRepositoryInterface;
+use App\Core\Entity\Domain\EntityRepositoryInterface;
 // Infraestructura (Implementaciones SQL)
 use App\Core\Auth\Infrastructure\Repositories\SqlAuthRepository;
 use App\Core\Patients\Infrastructure\Repositories\SqlPatientRepository;
@@ -29,6 +30,7 @@ use App\Core\Pharmacy\Infrastructure\Persistence\DatabasePharmacyRepository;
 use App\Core\Payments\Infrastructure\Repositories\SqlPaymentRepository;
 use App\Core\SaaS\Infrastructure\Repositories\SqlSaaSRepository;
 use App\Core\Entity\Infrastructure\SqlEntityScheduleRepository;
+use App\Core\Entity\Infrastructure\SqlEntityRepository;
 
 class RepositoryServiceProvider extends ServiceProvider
 {
@@ -45,6 +47,7 @@ class RepositoryServiceProvider extends ServiceProvider
         $this->app->bind(SaaSRepositoryInterface::class, SqlSaaSRepository::class);
         $this->app->bind(PharmacyRepositoryInterface::class, DatabasePharmacyRepository::class);
         $this->app->bind(EntityScheduleRepositoryInterface::class, SqlEntityScheduleRepository::class);
+        $this->app->bind(EntityRepositoryInterface::class,SqlEntityRepository::class);
     }
 
     public function boot(): void

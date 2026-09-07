@@ -10,6 +10,7 @@ use App\Core\Auth\Application\Commands\LoginCommand;
 use App\Core\Auth\Application\Handlers\LoginHandler;
 use App\Core\Auth\Domain\Ports\AuthRepositoryInterface;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -106,7 +107,7 @@ class AuthController extends Controller
         }
     }
 
-    public function registerDoctor(Request $request): JsonResponse
+   public function registerDoctor(Request $request): JsonResponse
     {
         try {
             $validated = $request->validate([
@@ -116,15 +117,6 @@ class AuthController extends Controller
                 'apellido'            => 'required|string|max:100',
                 'especialidad_id'     => 'required|integer',
                 'numero_colegiado'    => 'required|string|unique:Doctores,NumeroColegiado',
-
-                'nacionalidad'          => 'nullable|string|max:50',
-                'habla_ingles'          => 'nullable|boolean',
-                'otros_idiomas'         => 'nullable|string|max:255',
-                'disponible_domicilio'  => 'nullable|boolean',
-                'latitud'               => 'nullable|numeric',
-                'longitud'              => 'nullable|numeric',
-                'direccion_consultorio' => 'nullable|string|max:255',
-
                 'fotografia'          => 'required|file|image|mimes:jpg,jpeg,png|max:2048',
                 'titulo_medico'       => 'required|file|mimes:pdf,jpg,png|max:3072',
                 'titulo_especialista' => 'required|file|mimes:pdf,jpg,png|max:3072',
@@ -132,67 +124,32 @@ class AuthController extends Controller
                 'dni'                 => 'required|file|mimes:pdf,jpg,png|max:2048',
             ]);
 
-            $rolDoctorId = DB::table('Roles')->where('NombreRol', 'Doctor')->value('RolID') ?? 2;
+            $filePaths = [
+                'fotografia'          => $request->file('fotografia')->store('doctores/fotos', 'public'),
+                'titulo_medico'       => $request->file('titulo_medico')->store('doctores/titulos_medicos', 'public'),
+                'titulo_especialista' => $request->file('titulo_especialista')->store('doctores/titulos_especialidades', 'public'),
+                'constancia_colegio'  => $request->file('constancia_colegio')->store('doctores/constancias', 'public'),
+                'dni'                 => $request->file('dni')->store('doctores/documentos_identidad', 'public'),
+            ];
 
-            $pathFoto = $request->file('fotografia')->store('doctores/fotos', 'public');
-            $pathTituloMed = $request->file('titulo_medico')->store('doctores/titulos_medicos', 'public');
-            $pathTituloEsp = $request->file('titulo_especialista')->store('doctores/titulos_especialidades', 'public');
-            $pathConstancia = $request->file('constancia_colegio')->store('doctores/constancias', 'public');
-            $pathDni = $request->file('dni')->store('doctores/documentos_identidad', 'public');
-
-            DB::beginTransaction();
-
-            $passwordHash = Hash::make($validated['password']);
-
-            DB::statement("
-                INSERT INTO Usuarios (RolID, Email, PasswordHash, EntidadID, Estado)
-                VALUES (?, ?, ?, NULL, 0)
-            ", [$rolDoctorId, $validated['email'], $passwordHash]);
-
-            $usuarioCreado = DB::table('Usuarios')->where('Email', $validated['email'])->first();
-
-            DB::statement("
-                INSERT INTO Doctores (
-                    UsuarioID, EspecialidadID, Nombre, Apellido, NumeroColegiado,
-                    RutaFoto, RutaTituloMedico, RutaTituloEspecialista, RutaConstanciaColegio, RutaDni,
-                    Nacionalidad, HablaIngles, OtrosIdiomas, DisponibleDomicilio, Latitud, Longitud, DireccionConsultorio,
-                    EsVerificado, Estado
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1)
-            ", [
-                $usuarioCreado->UsuarioID,
-                $validated['especialidad_id'],
-                $validated['nombre'],
-                $validated['apellido'],
-                $validated['numero_colegiado'],
-                $pathFoto,
-                $pathTituloMed,
-                $pathTituloEsp,
-                $pathConstancia,
-                $pathDni,
-                $validated['nacionalidad'] ?? 'Hondureña',
-                $hablaIngles,
-                $validated['otros_idiomas'] ?? null,
-                $disponibleDomicilio,
-                $validated['latitud'] ?? null,
-                $validated['longitud'] ?? null,
-                $validated['direccion_consultorio'] ?? null
-            ]);
-
-            DB::commit();
+            $this->repository->registerDoctor($validated, $filePaths);
 
             return response()->json([
-                'status' => 'success',
-                'message' => 'Solicitud de registro enviada con éxito. Un administrador auditará sus documentos para habilitar el inicio de sesión.'
+                'status'  => 'success',
+                'message' => 'Solicitud de registro enviada con éxito. Un administrador auditará sus documentos.'
             ], 201);
 
-        } catch (\Exception $e) {
-            DB::rollBack();
+        } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
-                'status' => 'error',
-                'message' => 'No se pudo procesar el registro.',
-                'error' => $e->getMessage()
+                'status'  => 'error',
+                'message' => 'Datos inválidos o duplicados (email/colegiado ya existen).',
+                'errors'  => $e->errors()
             ], 422);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status'  => 'error',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 

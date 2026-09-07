@@ -21,11 +21,16 @@ use App\Http\Controllers\Api\{
     EntityController
 };
 
-// RUTAS PÚBLICAS
+// RUTAS PÚBLICAS (Accesibles sin Token / Sanctum)
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register-patient', [PatientController::class, 'store']);
 Route::post('/register-doctor', [AuthController::class, 'registerDoctor']);
+Route::post('/register-institution', [EntityController::class, 'registerInstitution']);
 Route::put('/auth/password', [AuthController::class, 'changePassword']);
+
+// 🟢 Catálogo público de especialidades para formularios de alta
+Route::get('/especialidades', [SpecialtyController::class, 'index']);
+
 
 // RUTAS PROTEGIDAS (Sanctum Core)
 Route::middleware('auth:sanctum')->group(function () {
@@ -34,7 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/system/settings', [SystemSettingController::class, 'index']);
     Route::post('/system/settings', [SystemSettingController::class, 'updateSetting']);
 
-    //Actualizar Plan SaaS
+    // Actualizar Plan SaaS
     Route::post('saas/actualizar-plan', [SaaSController::class, 'actualizarPlanMembresia']);
     // Estado e Indicadores de Límites SaaS / Founder
     Route::get('saas/estado', [SaaSController::class, 'obtenerEstadoSaaS']);
@@ -53,6 +58,7 @@ Route::middleware('auth:sanctum')->group(function () {
         });
 
         Route::apiResource('clinicas', ClinicController::class);
+        Route::get('/entidades', [EntityController::class, 'getEntidadesPublicas']);
         Route::apiResource('pacientes', PatientController::class);
 
         // Reportes de Dashboard & BI
@@ -63,6 +69,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('admin/usuarios/{id}/estado', [AdminController::class, 'cambiarEstado']);
         Route::get('/admin/indicadores-calidad', [App\Http\Controllers\Api\ReportController::class, 'obtenerIndicadoresCalidad']);
         Route::get('/audit/quality', [ReportController::class, 'obtenerIndicadoresCalidad']);
+        // RUTAS DE APROBACIÓN DE INSTITUCIONES (Clínicas, Farmacias, Laboratorios)
+        Route::get('admin/entidades-pendientes', [EntityController::class, 'getPendingEntities']);
+        Route::put('admin/entidades/{id}/aprobar', [EntityController::class, 'approveEntity']);
 
         // Ruta para el Dashboard de las Clínicas
         Route::get('/clinica/dashboard', [App\Http\Controllers\Api\ClinicDashboardController::class, 'getDashboardData']);
@@ -76,7 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('admin/reportes/exportar', [SaaSController::class, 'exportarReporte']);
     });
 
-    // --- ROL: SOLO DOCTORES (Protegidos por Cuotas SaaS) ---
+    // --- ROL: SOLO DOCTORES ---
     Route::middleware('role:Doctor')->group(function () {
         Route::get('doctor/stats/{usuarioId}', [AppointmentController::class, 'getDoctorStats']);
         Route::get('doctor/citas/{usuarioId}', [AppointmentController::class, 'getAppointmentsByDoctorUser']);
@@ -95,14 +104,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/doctor/diagnosticos/buscar', [HistoryController::class, 'buscarDiagnosticosCIE11']);
         Route::get('/doctor/catalogo-examen-fisico', [AppointmentController::class, 'getCatalogoExamenFisico']);
 
-
         Route::post('/doctor/catalogo-precios', [PaymentController::class, 'guardarCatalogoYUbicacion']);
         Route::get('/doctor/perfil-ubicacion', [PaymentController::class, 'obtenerPerfilUbicacion']);
         Route::get('/doctor/consulta/facturacion-detalle', [HistoryController::class, 'obtenerDetalleParaFacturacion']);
         Route::post('/pagos/procesar', [PaymentController::class, 'registrarPago']);
-        //dashOdontologa
-        Route::middleware('auth:sanctum')->get('/medico/dashboard-mensual', [HistoryController::class, 'obtenerMiniDashboardMensual']);
-        // Gestión disponibilidad con ID de doctor (Dentro del grupo de middleware 'role:Doctor')
+
+        Route::get('/medico/dashboard-mensual', [HistoryController::class, 'obtenerMiniDashboardMensual']);
+
         Route::get('doctores/{id}/disponibilidad', [DoctorController::class, 'obtenerDisponibilidad']);
         Route::post('doctores/{id}/horarios', [DoctorController::class, 'guardarHorarios']);
         Route::post('doctores/{id}/bloqueos', [DoctorController::class, 'crearBloqueo']);
@@ -130,22 +138,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/recetas/buscar', [PharmacyController::class, 'buscarReceta']);
         Route::put('/recetas/{id}/estado', [PharmacyController::class, 'cambiarEstado']);
         Route::post('/recetas/{id}/surtir', [PharmacyController::class, 'surtir']);
-        Route::post('/recetas/surtir-lote', [PharmacyController::class, 'surtirLote']); // <-- CORREGIDO AQUÍ
+        Route::post('/recetas/surtir-lote', [PharmacyController::class, 'surtirLote']);
     });
 
-    // --- ACCESO COMPARTIDO MUTUO ---
-    Route::apiResource('especialidades', SpecialtyController::class);
+    // --- ACCESO COMPARTIDO MUTUO (Solo Operaciones de Escritura/Modificación) ---
+    Route::apiResource('especialidades', SpecialtyController::class)->except(['index']);
     Route::get('doctores', [DoctorController::class, 'index']);
     Route::get('reports/appointments', [ReportController::class, 'appointmentsReport']);
     Route::delete('citas/{id}', [AppointmentController::class, 'destroy']);
     Route::put('especialidades/{id}/desactivar', [SpecialtyController::class, 'desactivar']);
     Route::put('clinicas/{id}/desactivar', [ClinicController::class, 'desactivar']);
     Route::get('/doctor/catalogo-precios', [PaymentController::class, 'obtenerCatalogoPrecios']);
-    // Rutas de Facturación y Pagos:
     Route::get('/doctor/consulta/facturacion-detalle', [HistoryController::class, 'obtenerDetalleParaFacturacion']);
     Route::post('/pagos/procesar', [PaymentController::class, 'registrarPago']);
 
-    //Catálogo de Enfermedades Crónicas
+    // Catálogos Públicos Compartidos
     Route::get('/enfermedades-cronicas', function() {
         return response()->json(
             \Illuminate\Support\Facades\DB::table('EnfermedadesCronicas')->where('Estado', 1)->get()
@@ -156,47 +163,32 @@ Route::middleware('auth:sanctum')->group(function () {
             \Illuminate\Support\Facades\DB::table('CatalogoMedicamentos')->where('Estado', 1)->get()
         , 200);
     });
-    //Catálogo de Alergias para Selección Múltiple
     Route::get('/catalogo-alergias', function() {
         return response()->json(
             \Illuminate\Support\Facades\DB::table('CatalogoAlergias')->where('Estado', 1)->get()
         , 200);
     });
 
-    // RUTAS DE LABORATORIO (Acceso Operativo y Dashboard)
+    // RUTAS DE LABORATORIO
     Route::prefix('laboratorio')->group(function () {
-        // Dashboard y Métricas (Accesible por usuarios de laboratorio)
         Route::get('/dashboard-metrics', [LaboratoryDashboardController::class, 'getDashboardData']);
-
-        // Catálogo y Consultas
         Route::get('catalogo', [LaboratoryController::class, 'catalogo']);
         Route::get('paciente/{pacienteId}/ordenes', [LaboratoryController::class, 'ordenesPaciente']);
         Route::get('orden/{ordenId}/resultados', [LaboratoryController::class, 'resultadosOrden']);
-
-        // Gestión de Órdenes (Operativo)
         Route::get('/ordenes', [LaboratoryController::class, 'obtenerOrdenes']);
         Route::get('/ordenes/{ordenId}/examenes', [LaboratoryController::class, 'obtenerExamenesDetalle']);
         Route::post('/ordenes', [LaboratoryController::class, 'crearSolicitudDigital']);
         Route::put('/ordenes/{id}/aceptar', [LaboratoryController::class, 'aceptarOrden']);
         Route::post('/ordenes/escanear-qr', [LaboratoryController::class, 'validarQR']);
         Route::post('/ordenes/{id}/subir-resultados', [LaboratoryController::class, 'subirResultadosPDF']);
-
-        // Tarifario
         Route::put('/tarifario/{examId}', [LaboratoryController::class, 'actualizarTarifa']);
         Route::put('/ordenes/{ordenId}/actualizar-examenes', [LaboratoryController::class, 'actualizarExamenesOrden']);
     });
 
-    // 1. Ruta para obtener todas las instituciones/clínicas
-    Route::get('/entidades', [ClinicController::class, 'getEntidadesPublicas']);
-
-    // 2. Ruta para obtener los doctores que pertenecen a una clínica específica
+    Route::get('/entidades', [EntityController::class, 'getEntidadesPublicas']);
     Route::get('/doctores/entidad/{id}', [DoctorController::class, 'getByClinic']);
-    Route::get('/doctores/entidad/{id}', [DoctorController::class, 'getByClinic']);
-    // Ruta Pública/Paciente para consultar slots de citas disponibles
     Route::get('doctores/{id}/slots-disponibles', [DoctorController::class, 'obtenerSlotsDisponibles']);
-    //Horarios Disponibles Lab y Farmacias
     Route::get('/entidades/{entityId}/horarios', [EntityScheduleController::class, 'index']);
     Route::put('/entidades/{entityId}/horarios', [EntityScheduleController::class, 'update']);
-    //Entidades existentes
     Route::get('/instituciones', [EntityController::class, 'index']);
 });

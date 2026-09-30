@@ -108,6 +108,7 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
     public function getAllActive(array $filters = []): array {
         $query = DB::table('Doctores as D')
             ->join('Especialidades as E', 'D.EspecialidadID', '=', 'E.EspecialidadID')
+            ->join('Usuarios as U', 'D.UsuarioID', '=', 'U.UsuarioID')
             ->select(
                 'D.DoctorID',
                 'D.UsuarioID',
@@ -124,6 +125,8 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                 'D.Latitud',
                 'D.Longitud',
                 'D.DireccionConsultorio',
+                'U.EsFounder',
+                'U.NivelFounder',
                 DB::raw("
                     CASE
                         -- 1. Verifica el horario configurado para hoy con tu fórmula exacta (+1)
@@ -355,6 +358,8 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
                 'D.Latitud',
                 'D.Longitud',
                 'D.DireccionConsultorio',
+                'U.EsFounder',
+                'U.NivelFounder',
                 DB::raw('ISNULL(MAX(SM.Precio), 90) as CostoConsulta')
             )
             ->where('U.EntidadID', $entidadId)
@@ -362,7 +367,7 @@ class SqlDoctorRepository implements DoctorRepositoryInterface {
             ->groupBy(
                 'D.DoctorID', 'D.Nombre', 'D.Apellido', 'E.NombreEspecialidad',
                 'U.EntidadID', 'D.RutaFoto', 'D.EsVerificado', 'D.Estado',
-                'D.Nacionalidad', 'D.HablaIngles', 'D.OtrosIdiomas',
+                'D.Nacionalidad', 'D.HablaIngles', 'D.OtrosIdiomas', 'U.EsFounder', 'U.NivelFounder',
                 'D.DisponibleDomicilio', 'D.Latitud', 'D.Longitud', 'D.DireccionConsultorio'
             )
             ->get()

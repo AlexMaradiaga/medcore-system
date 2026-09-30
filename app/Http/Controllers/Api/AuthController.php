@@ -14,6 +14,7 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
@@ -67,20 +68,26 @@ class AuthController extends Controller
                 $entidad = DB::table('Entidades')->where('EntidadID', $userModel->EntidadID)->first();
             }
 
-            $suscripcion = DB::table('Sistema_Suscripciones_SaaS')
-                ->where('UsuarioID', $usuario->id)
-                ->when($userModel->EntidadID, function ($query) use ($userModel) {
-                    return $query->orWhere('EntidadID', $userModel->EntidadID);
-                })
-                ->first();
+            $tipoSuscriptor = $doctor ? 'Doctor' : ($entidad->TipoEntidad ?? null);
+            $suscripcion = null;
+            if ($tipoSuscriptor) {
+                $suscripcionQuery = DB::table('Sistema_Suscripciones_SaaS')
+                    ->where('TipoSuscriptor', $tipoSuscriptor);
+
+                $tipoSuscriptor === 'Doctor'
+                    ? $suscripcionQuery->where('UsuarioID', $usuario->id)
+                    : $suscripcionQuery->where('EntidadID', $userModel->EntidadID);
+
+                $suscripcion = $suscripcionQuery->orderByDesc('SuscripcionSaaSID')->first();
+            }
 
             $plan = $suscripcion->PlanAsignado ?? $suscripcion->TipoPlan ?? null;
 
             if (!$plan) {
-                $plan = ($entidad || ($doctor && $doctor->EsVerificado == 1)) ? 'Ejecutivo' : 'Gratis';
+                $plan = 'Sin plan';
             }
 
-            $estadoSaaS = $suscripcion->EstadoSaaS ?? 1;
+            $estadoSaaS = $suscripcion->EstadoSuscripcion ?? null;
 
             $token = $userModel->createToken('auth_token')->plainTextToken;
 
@@ -93,8 +100,11 @@ class AuthController extends Controller
                     'rol_id'       => $usuario->rolId,
                     'entidad_id'   => $userModel->EntidadID,
                     'tipo_entidad' => $entidad ? $entidad->TipoEntidad : null,
+                    'tipo_suscriptor' => $tipoSuscriptor,
                     'plan'         => $plan,
-                    'estado_saas'  => $estadoSaaS
+                    'estado_saas'  => $estadoSaaS,
+                    'es_founder'  => (bool) ($userModel->EsFounder ?? false),
+                    'nivel_founder' => $userModel->NivelFounder,
                 ],
                 'access_token' => $token,
                 'token_type'   => 'Bearer'
@@ -180,6 +190,56 @@ class AuthController extends Controller
                 'status' => 'error',
                 'error'  => $e->getMessage()
             ], 400);
+        }
+    }
+
+    public function updateAuthenticatedProfile(Request $request): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'current_password' => ['required', 'string'],
+                'email' => ['nullable', 'required_without:new_password', 'email', 'max:100'],
+                'new_password' => [
+                    'nullable',
+                    'required_without:email',
+                    'confirmed',
+                    'different:current_password',
+                    Password::min(8)->letters()->numbers(),
+                ],
+            ]);
+
+            $resultado = $this->repository->updateAuthenticatedProfile(
+                (int) $request->user()->getAuthIdentifier(),
+                $validated['current_password'],
+                $validated['email'] ?? null,
+                $validated['new_password'] ?? null
+            );
+
+            if ($resultado['password_changed']) {
+                $request->user()->tokens()->delete();
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => $resultado['password_changed']
+                    ? 'Credenciales actualizadas. Por seguridad debes iniciar sesión nuevamente.'
+                    : 'Correo administrativo actualizado correctamente.',
+                'data' => [
+                    'email' => $resultado['email'],
+                    'requires_reauthentication' => $resultado['password_changed'],
+                ],
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Revise los datos del formulario.',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => $e->getMessage(),
+            ], 422);
         }
     }
 

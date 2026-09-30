@@ -18,6 +18,8 @@ use App\Http\Controllers\Api\{
     LaboratoryDashboardController,
     PharmacyController,
     EntityScheduleController,
+    SystemSettingController,
+    StrategicAnalyticsController,
     EntityController
 };
 
@@ -41,11 +43,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Actualizar Plan SaaS
     Route::post('saas/actualizar-plan', [SaaSController::class, 'actualizarPlanMembresia']);
+    Route::get('saas/planes', [SaaSController::class, 'obtenerPlanes']);
     // Estado e Indicadores de Límites SaaS / Founder
     Route::get('saas/estado', [SaaSController::class, 'obtenerEstadoSaaS']);
 
     // --- ROL: SOLO ADMINISTRADORES ---
     Route::middleware('role:Admin')->group(function () {
+        Route::put('admin/profile', [AuthController::class, 'updateAuthenticatedProfile']);
         Route::get('admin/usuarios', [AdminController::class, 'obtenerUsuarios']);
         Route::get('admin/doctores/entidad', [AdminController::class, 'obtenerDoctoresPorEntidad']);
         Route::get('admin/usuarios/agrupados', [AdminController::class, 'obtenerUsuariosPorRol']);
@@ -64,9 +68,17 @@ Route::middleware('auth:sanctum')->group(function () {
         // Reportes de Dashboard & BI
         Route::get('reports/dashboard', [ReportController::class, 'dashboardStats']);
         Route::get('admin/reports/analytics', [ReportController::class, 'obtenerReportesAnaliticos']);
+        Route::get('admin/reports/appointments-financial', [ReportController::class, 'appointmentsFinancialReport']);
+        Route::get('admin/reports/appointments-financial/pdf', [ReportController::class, 'exportAppointmentsFinancialPdf']);
+        Route::get('admin/reports/appointments-financial/excel', [ReportController::class, 'exportAppointmentsFinancialExcel']);
+        Route::get('admin/reports/strategic-analytics', [StrategicAnalyticsController::class, 'index']);
+        Route::get('admin/reports/strategic-analytics/pdf', [StrategicAnalyticsController::class, 'exportPdf']);
+        Route::get('admin/reports/strategic-analytics/excel', [StrategicAnalyticsController::class, 'exportExcel']);
         Route::get('admin/doctores-pendientes', [AdminController::class, 'obtenerDoctoresPendientes']);
         Route::put('admin/doctores/{id}/aprobar', [AdminController::class, 'aprobarDoctor']);
         Route::put('admin/usuarios/{id}/estado', [AdminController::class, 'cambiarEstado']);
+        Route::get('admin/doctores/{id}/documentos', [AdminController::class, 'documentosDoctor']);
+        Route::put('admin/doctores/{id}/founder', [AdminController::class, 'actualizarFounder']);
         Route::get('/admin/indicadores-calidad', [App\Http\Controllers\Api\ReportController::class, 'obtenerIndicadoresCalidad']);
         Route::get('/audit/quality', [ReportController::class, 'obtenerIndicadoresCalidad']);
         // RUTAS DE APROBACIÓN DE INSTITUCIONES (Clínicas, Farmacias, Laboratorios)

@@ -45,6 +45,59 @@ class SqlAuthRepository implements AuthRepositoryInterface
             ]) > 0;
     }
 
+    public function updateAuthenticatedProfile(
+        int $userId,
+        string $currentPassword,
+        ?string $email,
+        ?string $newPassword
+    ): array {
+        return DB::transaction(function () use ($userId, $currentPassword, $email, $newPassword) {
+            $usuario = DB::table('Usuarios')
+                ->where('UsuarioID', $userId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$usuario) {
+                throw new Exception('La cuenta autenticada no existe.');
+            }
+
+            if (!Hash::check($currentPassword, $usuario->PasswordHash)) {
+                throw new Exception('La contraseña actual no es correcta.');
+            }
+
+            $nuevoCorreo = $email ? mb_strtolower(trim($email)) : $usuario->Email;
+
+            $correoOcupado = DB::table('Usuarios')
+                ->whereRaw('LOWER(Email) = ?', [$nuevoCorreo])
+                ->where('UsuarioID', '<>', $userId)
+                ->exists();
+
+            if ($correoOcupado) {
+                throw new Exception('El correo indicado ya está registrado por otra cuenta.');
+            }
+
+            $cambios = [];
+            if ($nuevoCorreo !== $usuario->Email) {
+                $cambios['Email'] = $nuevoCorreo;
+            }
+
+            if ($newPassword) {
+                $cambios['PasswordHash'] = Hash::make($newPassword);
+            }
+
+            if ($cambios !== []) {
+                DB::table('Usuarios')
+                    ->where('UsuarioID', $userId)
+                    ->update($cambios);
+            }
+
+            return [
+                'email' => $nuevoCorreo,
+                'password_changed' => $newPassword !== null && $newPassword !== '',
+            ];
+        });
+    }
+
    public function registerDoctor(array $data, array $filePaths): int
     {
         $hablaIngles = !empty($data['habla_ingles']) ? 1 : 0;
@@ -111,16 +164,22 @@ class SqlAuthRepository implements AuthRepositoryInterface
             $entidad = DB::table('Entidades')->where('EntidadID', $userRecord->EntidadID)->first();
         }
 
-        $suscripcion = DB::table('Sistema_Suscripciones_SaaS')
-            ->where('UsuarioID', $usuario->id)
-            ->when($userRecord->EntidadID, function ($query) use ($userRecord) {
-                return $query->orWhere('EntidadID', $userRecord->EntidadID);
-            })
-            ->first();
+        $tipoSuscriptor = $doctor ? 'Doctor' : ($entidad->TipoEntidad ?? null);
+        $suscripcion = null;
+        if ($tipoSuscriptor) {
+            $suscripcionQuery = DB::table('Sistema_Suscripciones_SaaS')
+                ->where('TipoSuscriptor', $tipoSuscriptor);
+
+            $tipoSuscriptor === 'Doctor'
+                ? $suscripcionQuery->where('UsuarioID', $usuario->id)
+                : $suscripcionQuery->where('EntidadID', $userRecord->EntidadID);
+
+            $suscripcion = $suscripcionQuery->orderByDesc('SuscripcionSaaSID')->first();
+        }
 
         $plan = $suscripcion->PlanAsignado ?? $suscripcion->TipoPlan ?? null;
         if (!$plan) {
-            $plan = ($entidad || ($doctor && $doctor->EsVerificado == 1)) ? 'Ejecutivo' : 'Gratis';
+            $plan = 'Sin plan';
         }
 
         return [
@@ -129,8 +188,9 @@ class SqlAuthRepository implements AuthRepositoryInterface
             'rol_id'       => $usuario->rolId,
             'entidad_id'   => $userRecord->EntidadID,
             'tipo_entidad' => $entidad ? $entidad->TipoEntidad : null,
+            'tipo_suscriptor' => $tipoSuscriptor,
             'plan'         => $plan,
-            'estado_saas'  => $suscripcion->EstadoSaaS ?? 1
+            'estado_saas'  => $suscripcion->EstadoSuscripcion ?? null
         ];
     }
 }

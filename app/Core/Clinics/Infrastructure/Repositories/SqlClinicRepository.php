@@ -4,6 +4,7 @@ namespace App\Core\Clinics\Infrastructure\Repositories;
 
 use App\Core\Clinics\Domain\Ports\ClinicRepositoryInterface;
 use Illuminate\Support\Facades\DB;
+use App\Services\SaaSSubscriptionProvisioner;
 
 class SqlClinicRepository implements ClinicRepositoryInterface
 {
@@ -44,6 +45,8 @@ class SqlClinicRepository implements ClinicRepositoryInterface
                     'EsPrincipal'       => 1
                 ]);
             }
+
+            app(SaaSSubscriptionProvisioner::class)->provisionEntity((int) $entidadId);
 
             return true;
         });

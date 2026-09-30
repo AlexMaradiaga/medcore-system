@@ -43,6 +43,48 @@ class HistoryController extends Controller
             $stmt->nextRowset();
             $metaAutorizacion = $stmt->fetch(\PDO::FETCH_ASSOC);
             $autorizacionGlobal = $metaAutorizacion ? (bool)$metaAutorizacion['AutorizacionGlobal'] : false;
+            $stmt->closeCursor();
+
+            // Las órdenes viven en OrdenesLaboratorio y no en Resultados_Laboratorio.
+            // Por eso se consultan por separado para que el médico vea también órdenes
+            // emitidas, aceptadas o pendientes aunque todavía no tengan resultado PDF.
+            $ordenesQuery = DB::table('OrdenesLaboratorio as ol')
+                ->leftJoin('Entidades as e', 'ol.LaboratorioID', '=', 'e.EntidadID')
+                ->leftJoin('Doctores as d', 'ol.DoctorID', '=', 'd.DoctorID')
+                ->where('ol.PacienteID', $pacienteId);
+
+            if (!$autorizacionGlobal) {
+                $ordenesQuery->where('ol.DoctorID', $doctorId);
+            }
+
+            $ordenesLaboratorio = $ordenesQuery
+                ->select(
+                    'ol.OrdenID',
+                    'ol.ConsultaID',
+                    'ol.CodigoOrden',
+                    'ol.Estado',
+                    'ol.FechaOrden',
+                    'ol.FechaCompletado',
+                    'ol.NotasClinicas',
+                    'ol.ArchivoPdfPath',
+                    DB::raw("COALESCE(e.NombreEntidad, 'Laboratorio no especificado') as Laboratorio"),
+                    DB::raw("LTRIM(RTRIM(CONCAT(COALESCE(d.Nombre, ''), ' ', COALESCE(d.Apellido, '')))) as Doctor")
+                )
+                ->orderByDesc('ol.FechaOrden')
+                ->get()
+                ->map(function ($orden) {
+                    $examenes = DB::table('OrdenExamenDetalle as oed')
+                        ->join('CatalogoExamenesLab as cel', 'oed.ExamID', '=', 'cel.ExamID')
+                        ->where('oed.OrdenID', $orden->OrdenID)
+                        ->select('cel.ExamID', 'cel.NombreExamen', 'cel.Categoria', 'oed.Estado')
+                        ->orderBy('cel.NombreExamen')
+                        ->get()
+                        ->map(fn ($item) => (array) $item)
+                        ->all();
+
+                    return array_merge((array) $orden, ['examenes' => $examenes]);
+                })
+                ->all();
 
             return response()->json([
                 'estado' => 'success',
@@ -51,6 +93,7 @@ class HistoryController extends Controller
                     'paciente'     => $pacienteBasal,
                     'consultas'    => $consultas,
                     'examenes'     => $examenes,
+                    'ordenesLaboratorio' => $ordenesLaboratorio,
                     'comparativos' => $comparativos
                 ]
             ]);
@@ -188,6 +231,57 @@ class HistoryController extends Controller
                 ];
             }
 
+            $recetas = DB::table('Recetas')
+                ->where('ConsultaID', $request->consulta_id)
+                ->select(
+                    'RecetaID',
+                    'CodigoCanje',
+                    'NombreMedicamento',
+                    'Dosis',
+                    'Indicaciones',
+                    'YaCanjeada',
+                    'EstadoReceta',
+                    'FechaEmision'
+                )
+                ->orderBy('RecetaID')
+                ->get()
+                ->map(fn ($item) => (array) $item)
+                ->all();
+
+            $ordenesLaboratorio = DB::table('OrdenesLaboratorio as ol')
+                ->leftJoin('Entidades as e', 'ol.LaboratorioID', '=', 'e.EntidadID')
+                ->where('ol.ConsultaID', $request->consulta_id)
+                ->select(
+                    'ol.OrdenID',
+                    'ol.CodigoOrden',
+                    'ol.Estado',
+                    'ol.FechaOrden',
+                    'ol.FechaCompletado',
+                    'ol.NotasClinicas',
+                    'ol.ArchivoPdfPath',
+                    DB::raw("COALESCE(e.NombreEntidad, 'Laboratorio no especificado') as Laboratorio")
+                )
+                ->orderBy('ol.FechaOrden', 'desc')
+                ->get()
+                ->map(function ($orden) {
+                    $examenes = DB::table('OrdenExamenDetalle as oed')
+                        ->join('CatalogoExamenesLab as cel', 'oed.ExamID', '=', 'cel.ExamID')
+                        ->where('oed.OrdenID', $orden->OrdenID)
+                        ->select(
+                            'cel.ExamID',
+                            'cel.NombreExamen',
+                            'cel.Categoria',
+                            'oed.Estado'
+                        )
+                        ->orderBy('cel.NombreExamen')
+                        ->get()
+                        ->map(fn ($item) => (array) $item)
+                        ->all();
+
+                    return array_merge((array) $orden, ['examenes' => $examenes]);
+                })
+                ->all();
+
             return response()->json([
                 'estado' => 'success',
                 'datos'  => [
@@ -196,7 +290,9 @@ class HistoryController extends Controller
                     'diagnostico'             => $datosGenerales['Diagnostico'],
                     'notasEvolucionSubjetiva' => $datosGenerales['NotasMedicas'] ?? '',
                     'estado'                  => $datosGenerales['Estado'],
-                    'examenFisico'            => $examenFisicoFormateado
+                    'examenFisico'            => $examenFisicoFormateado,
+                    'recetas'                 => $recetas,
+                    'ordenesLaboratorio'      => $ordenesLaboratorio
                 ]
             ]);
 
@@ -217,7 +313,10 @@ class HistoryController extends Controller
 
             $medicamentos = DB::table('Recetas')
                 ->where('ConsultaID', $consultaId)
-                ->where('Estado', 1)
+                ->where(function ($query) {
+                    $query->where('Estado', 1)
+                        ->orWhereNull('Estado');
+                })
                 ->select('NombreMedicamento', 'Dosis', 'Indicaciones', 'CodigoCanje')
                 ->get();
 
@@ -256,8 +355,30 @@ class HistoryController extends Controller
                 'odontograma_json'                         => 'nullable|array',
                 'examenes_odontologicos_json'              => 'nullable|array',
                 'crear_seguimiento'                        => 'nullable|boolean',
-                'seguimiento_fecha_hora'                   => 'nullable|string'
+                'seguimiento_fecha_hora'                   => 'nullable|string',
+                'laboratorio_id'                           => 'nullable|required_with:examenes_laboratorio|integer|min:1',
+                'monto_total_laboratorio'                  => 'nullable|numeric|min:0',
+                'examenes_laboratorio'                     => 'nullable|array',
+                'examenes_laboratorio.*'                   => 'integer|min:1',
+                'notas_laboratorio'                        => 'nullable|string|max:2000',
             ]);
+
+            if (!empty($validated['examenes_laboratorio'])) {
+                $laboratorioValido = DB::table('Entidades')
+                    ->where('EntidadID', $validated['laboratorio_id'])
+                    ->where('Estado', 1)
+                    ->whereRaw("UPPER(LTRIM(RTRIM(TipoEntidad))) = 'LABORATORIO'")
+                    ->exists();
+
+                if (!$laboratorioValido) {
+                    return response()->json([
+                        'status' => 'error',
+                        'errors' => [
+                            'laboratorio_id' => ['Debe seleccionar un laboratorio activo y válido.']
+                        ]
+                    ], 422);
+                }
+            }
 
             $this->repository->complete($validated);
 

@@ -109,6 +109,7 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         return DB::table('Citas as c')
             ->join('Pacientes as p', 'c.PacienteID', '=', 'p.PacienteID')
             ->leftJoin('Doctores as d', 'c.DoctorID', '=', 'd.DoctorID')
+            ->leftJoin('Especialidades as esp', 'd.EspecialidadID', '=', 'esp.EspecialidadID')
             ->leftJoin('Entidades as e', 'c.EntidadID', '=', 'e.EntidadID')
             ->leftJoin('Consultas as con', 'c.CitaID', '=', 'con.CitaID')
             ->where(function ($query) use ($id) {
@@ -118,17 +119,20 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
             ->select([
                 'c.CitaID',
                 'c.CitaID as Folio',
+                'con.ConsultaID',
                 'c.FechaHora',
                 'c.EstadoCita',
                 'c.EstadoCita as Estado',
                 DB::raw("'General' as TipoCita"),
                 'c.Motivo',
+                'c.Sintomas',
                 'p.PacienteID',
                 'p.Nombre as PacienteNombre',
                 DB::raw("COALESCE(CONCAT(d.Nombre, ' ', d.Apellido), 'Dr. Por Asignar') as Doctor"),
                 DB::raw("COALESCE(e.NombreEntidad, 'Clínica Principal') as Clinica"),
+                DB::raw("COALESCE(esp.NombreEspecialidad, 'Medicina General') as Especialidad"),
                 'con.Diagnostico',
-                DB::raw("NULL as Sintomas")
+                'con.NotasMedicas'
             ])
             ->orderBy('c.FechaHora', 'DESC')
             ->get()
@@ -200,6 +204,220 @@ class SqlAppointmentRepository implements AppointmentRepositoryInterface
         }
 
         return $query->get()->toArray();
+    }
+
+    /**
+     * Reporte administrativo de citas, atención clínica y cobros.
+     *
+     * Los pagos se agregan primero por cita para que una consulta con varios
+     * detalles de pago no multiplique las filas ni los importes del reporte.
+     */
+    public function getFinancialReport(array $filters): array
+    {
+        $effectiveStatusSql = "CASE
+            WHEN UPPER(ISNULL(c.EstadoCita, '')) LIKE 'CANCELAD%'
+              OR UPPER(ISNULL(c.Motivo, '')) LIKE '%(CANCELADO:%'
+              OR UPPER(ISNULL(c.Motivo, '')) LIKE '%(CANCELADA:%'
+            THEN 'Cancelada'
+            ELSE ISNULL(c.EstadoCita, 'Sin estado')
+        END";
+
+        $latestConsultation = DB::table('Consultas as lc')
+            ->select('lc.CitaID', DB::raw('MAX(lc.ConsultaID) as ConsultaID'))
+            ->groupBy('lc.CitaID');
+
+        $paymentsByAppointment = DB::table('Consultas as pc')
+            ->join('Detalle_Pagos as dp', function ($join) {
+                $join->on('dp.ReferenciaID', '=', 'pc.ConsultaID')
+                    ->whereRaw("UPPER(LTRIM(RTRIM(dp.TipoConcepto))) = 'CONSULTA'");
+            })
+            ->join('Pagos as pg', 'pg.PagoID', '=', 'dp.PagoID')
+            ->select([
+                'pc.CitaID',
+                DB::raw("SUM(CASE
+                    WHEN UPPER(LTRIM(RTRIM(ISNULL(pg.EstadoPago, '')))) IN ('PAGADO', 'PROCESADO', 'APROBADO')
+                    THEN ISNULL(dp.MontoSubtotal, 0)
+                    ELSE 0
+                END) as MontoCobrado"),
+                DB::raw('SUM(ISNULL(dp.MontoSubtotal, 0)) as MontoRegistrado'),
+                DB::raw('COUNT(DISTINCT pg.PagoID) as CantidadPagos'),
+                DB::raw("STRING_AGG(CAST(ISNULL(pg.MetodoPago, 'No especificado') AS nvarchar(max)), ', ') as MetodosPago"),
+                DB::raw("STRING_AGG(CAST(ISNULL(pg.EstadoPago, 'Sin estado') AS nvarchar(max)), ', ') as EstadosPago"),
+                DB::raw('MAX(pg.FechaPago) as UltimaFechaPago'),
+                DB::raw('MAX(pg.UsuarioID) as UsuarioCobroID')
+            ])
+            ->groupBy('pc.CitaID');
+
+        $query = DB::table('Citas as c')
+            ->join('Pacientes as pa', 'c.PacienteID', '=', 'pa.PacienteID')
+            ->join('Doctores as d', 'c.DoctorID', '=', 'd.DoctorID')
+            ->leftJoin('Entidades as e', 'c.EntidadID', '=', 'e.EntidadID')
+            ->leftJoin('Usuarios as up', 'pa.UsuarioID', '=', 'up.UsuarioID')
+            ->leftJoinSub($latestConsultation, 'lc', function ($join) {
+                $join->on('lc.CitaID', '=', 'c.CitaID');
+            })
+            ->leftJoin('Consultas as con', 'con.ConsultaID', '=', 'lc.ConsultaID')
+            ->leftJoinSub($paymentsByAppointment, 'pay', function ($join) {
+                $join->on('pay.CitaID', '=', 'c.CitaID');
+            })
+            ->leftJoin('Usuarios as uc', 'pay.UsuarioCobroID', '=', 'uc.UsuarioID')
+            ->select([
+                'c.CitaID',
+                'c.FechaHora',
+                DB::raw("$effectiveStatusSql as EstadoCita"),
+                'c.EstadoCita as EstadoOriginal',
+                'c.Estado as RegistroActivo',
+                'c.Motivo',
+                'c.Sintomas',
+                'c.Alergias',
+                'c.MedicamentosActuales',
+                'pa.PacienteID',
+                DB::raw("LTRIM(RTRIM(CONCAT(pa.Nombre, ' ', pa.Apellido))) as Paciente"),
+                'pa.DNI',
+                'pa.Telefono as TelefonoPaciente',
+                'pa.Aseguradora',
+                'pa.NumeroPoliza',
+                'up.Email as EmailPaciente',
+                'd.DoctorID',
+                DB::raw("LTRIM(RTRIM(CONCAT(d.Nombre, ' ', d.Apellido))) as Doctor"),
+                'd.NumeroColegiado',
+                'c.EntidadID',
+                'e.NombreEntidad as Entidad',
+                'e.TipoEntidad',
+                'con.ConsultaID',
+                'con.FechaCreacion as FechaAtencion',
+                'con.Diagnostico',
+                'con.NotasMedicas',
+                DB::raw('ISNULL(pay.MontoCobrado, 0) as MontoCobrado'),
+                DB::raw('ISNULL(pay.MontoRegistrado, 0) as MontoRegistrado'),
+                DB::raw('ISNULL(pay.CantidadPagos, 0) as CantidadPagos'),
+                'pay.MetodosPago',
+                'pay.EstadosPago',
+                'pay.UltimaFechaPago',
+                'uc.Email as UsuarioCobro'
+            ]);
+
+        if (!empty($filters['doctor_id'])) {
+            $query->where('c.DoctorID', (int) $filters['doctor_id']);
+        }
+
+        if (!empty($filters['entidad_id'])) {
+            $query->where('c.EntidadID', (int) $filters['entidad_id']);
+        }
+
+        if (!empty($filters['fecha_inicio'])) {
+            $query->where('c.FechaHora', '>=', $filters['fecha_inicio'] . ' 00:00:00');
+        }
+
+        if (!empty($filters['fecha_fin'])) {
+            $query->where('c.FechaHora', '<=', $filters['fecha_fin'] . ' 23:59:59.997');
+        }
+
+        if (!empty($filters['estado'])) {
+            $query->whereRaw("$effectiveStatusSql = ?", [$filters['estado']]);
+        }
+
+        if (!empty($filters['paciente'])) {
+            $search = '%' . trim($filters['paciente']) . '%';
+            $query->where(function ($patientQuery) use ($search) {
+                $patientQuery
+                    ->whereRaw("CONCAT(pa.Nombre, ' ', pa.Apellido) LIKE ?", [$search])
+                    ->orWhere('pa.DNI', 'like', $search)
+                    ->orWhere('up.Email', 'like', $search);
+            });
+        }
+
+        if (!empty($filters['metodo_pago'])) {
+            $method = $filters['metodo_pago'];
+            $query->whereExists(function ($paymentQuery) use ($method) {
+                $paymentQuery->selectRaw('1')
+                    ->from('Consultas as fcon')
+                    ->join('Detalle_Pagos as fdp', function ($join) {
+                        $join->on('fdp.ReferenciaID', '=', 'fcon.ConsultaID')
+                            ->whereRaw("UPPER(LTRIM(RTRIM(fdp.TipoConcepto))) = 'CONSULTA'");
+                    })
+                    ->join('Pagos as fpg', 'fpg.PagoID', '=', 'fdp.PagoID')
+                    ->whereColumn('fcon.CitaID', 'c.CitaID')
+                    ->where('fpg.MetodoPago', $method);
+            });
+        }
+
+        if (!empty($filters['estado_pago'])) {
+            $paymentStatus = $filters['estado_pago'];
+            $query->whereExists(function ($paymentQuery) use ($paymentStatus) {
+                $paymentQuery->selectRaw('1')
+                    ->from('Consultas as fcon')
+                    ->join('Detalle_Pagos as fdp', function ($join) {
+                        $join->on('fdp.ReferenciaID', '=', 'fcon.ConsultaID')
+                            ->whereRaw("UPPER(LTRIM(RTRIM(fdp.TipoConcepto))) = 'CONSULTA'");
+                    })
+                    ->join('Pagos as fpg', 'fpg.PagoID', '=', 'fdp.PagoID')
+                    ->whereColumn('fcon.CitaID', 'c.CitaID')
+                    ->where('fpg.EstadoPago', $paymentStatus);
+            });
+        }
+
+        if (!empty($filters['solo_con_pago'])) {
+            $query->whereRaw('ISNULL(pay.CantidadPagos, 0) > 0');
+        }
+
+        return $query
+            ->orderByDesc('c.FechaHora')
+            ->limit(5000)
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->all();
+    }
+
+    public function getFinancialReportCatalogs(): array
+    {
+        $doctors = DB::table('Doctores')
+            ->select('DoctorID', DB::raw("LTRIM(RTRIM(CONCAT(Nombre, ' ', Apellido))) as Nombre"))
+            ->orderBy('Nombre')
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->all();
+
+        $entities = DB::table('Entidades')
+            ->select('EntidadID', 'NombreEntidad')
+            ->orderBy('NombreEntidad')
+            ->get()
+            ->map(fn ($row) => (array) $row)
+            ->all();
+
+        $paymentMethods = DB::table('Pagos')
+            ->whereNotNull('MetodoPago')
+            ->distinct()
+            ->orderBy('MetodoPago')
+            ->pluck('MetodoPago')
+            ->all();
+
+        $paymentStatuses = DB::table('Pagos')
+            ->whereNotNull('EstadoPago')
+            ->distinct()
+            ->orderBy('EstadoPago')
+            ->pluck('EstadoPago')
+            ->all();
+
+        $appointmentStatuses = DB::table('Citas')
+            ->whereNotNull('EstadoCita')
+            ->distinct()
+            ->orderBy('EstadoCita')
+            ->pluck('EstadoCita')
+            ->map(fn ($status) => stripos((string) $status, 'cancelad') === 0 ? 'Cancelada' : (string) $status)
+            ->push('Cancelada')
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        return [
+            'doctores' => $doctors,
+            'entidades' => $entities,
+            'estados_cita' => $appointmentStatuses,
+            'metodos_pago' => $paymentMethods,
+            'estados_pago' => $paymentStatuses,
+        ];
     }
 
     public function getStats(): array

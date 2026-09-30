@@ -6,24 +6,31 @@ use App\Core\SaaS\Domain\Ports\SaaSRepositoryInterface;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Exception;
+use App\Services\SaaSLimitService;
+use Illuminate\Support\Facades\DB;
 
 class SaaSController extends Controller
 {
     public function __construct(
-        private SaaSRepositoryInterface $repository
+        private SaaSRepositoryInterface $repository,
+        private SaaSLimitService $limitService
     ) {}
 
     public function actualizarPlanMembresia(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'tipo_plan'      => 'required|string',
-            'dias_vigencia'  => 'required|integer',
-            'token_pasarela' => 'required|string'
+            'tipo_plan'      => 'required|string|max:50',
+            'dias_vigencia'  => 'required|integer|min:1|max:366',
+            'token_pasarela' => 'required|string|max:100'
         ]);
 
         try {
-            // Fallback en caso de que la ruta de API no transporte la sesión de Sanctum/JWT
-            $usuarioId = auth()->id() ?? $request->input('usuario_id') ?? 4;
+            $user = $request->user();
+            if (!$user) {
+                return response()->json(['status' => 'error', 'message' => 'No autenticado.'], 401);
+            }
+
+            $usuarioId = $user->UsuarioID ?? $user->getAuthIdentifier();
 
             $exito = $this->repository->actualizarPlan(
                 (int) $usuarioId,
@@ -41,6 +48,28 @@ class SaaSController extends Controller
             return response()->json([
                 'status'  => 'error',
                 'message' => 'Error al actualizar el plan: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function obtenerPlanes(Request $request): JsonResponse
+    {
+        try {
+            $user = $request->user();
+            if (!$user) {
+                return response()->json(['status' => 'error', 'message' => 'No autenticado.'], 401);
+            }
+
+            $usuarioId = (int) ($user->UsuarioID ?? $user->getAuthIdentifier());
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $this->repository->obtenerPlanes($usuarioId),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'No fue posible consultar los planes: ' . $e->getMessage(),
             ], 500);
         }
     }

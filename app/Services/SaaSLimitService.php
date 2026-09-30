@@ -7,40 +7,26 @@ use Carbon\Carbon;
 
 class SaaSLimitService
 {
-    /**
-     * Obtiene el plan activo actual del usuario o su entidad.
-     */
+    /** Obtiene el plan del titular normalizado: Doctor por UsuarioID o entidad. */
     public function obtenerPlanUsuario(int $usuarioId): string
     {
-        // 1. Consultar en la tabla Membresia del usuario
-        $membresia = DB::table('Membresia')
-            ->where('UsuarioID', $usuarioId)
-            ->where('Estado', 1)
-            ->where('FechaExpiracion', '>', Carbon::now())
-            ->first();
+        $doctor = DB::table('Doctores')->where('UsuarioID', $usuarioId)->where('Estado', 1)->exists();
+        $entidadId = DB::table('Usuarios')->where('UsuarioID', $usuarioId)->value('EntidadID');
+        $tipoEntidad = $entidadId
+            ? DB::table('Entidades')->where('EntidadID', $entidadId)->where('Estado', 1)->value('TipoEntidad')
+            : null;
 
-        if ($membresia && !empty($membresia->TipoPlan)) {
-            return strtolower(trim($membresia->TipoPlan));
-        }
+        $query = DB::table('Sistema_Suscripciones_SaaS')
+            ->where('TipoSuscriptor', $doctor ? 'Doctor' : $tipoEntidad)
+            ->whereIn(DB::raw("UPPER(LTRIM(RTRIM(EstadoSuscripcion)))"), ['ACTIVO', 'ACTIVA', 'VIGENTE'])
+            ->where(function ($builder) {
+                $builder->whereNull('FechaVencimiento')->orWhere('FechaVencimiento', '>=', Carbon::now());
+            });
 
-        // 2. Verificar por suscripción de Entidad (Sistema_Suscripciones_SaaS)
-        $entidadId = DB::table('Usuarios')
-            ->where('UsuarioID', $usuarioId)
-            ->value('EntidadID');
+        $doctor ? $query->where('UsuarioID', $usuarioId) : $query->where('EntidadID', $entidadId);
+        $plan = $query->orderByDesc('SuscripcionSaaSID')->value('TipoPlan');
 
-        if ($entidadId) {
-            $suscripcionEntidad = DB::table('Sistema_Suscripciones_SaaS')
-                ->where('EntidadID', $entidadId)
-                ->where('EstadoSuscripcion', 'ACTIVA')
-                ->where('FechaVencimiento', '>', Carbon::now())
-                ->first();
-
-            if ($suscripcionEntidad && !empty($suscripcionEntidad->TipoPlan)) {
-                return strtolower(trim($suscripcionEntidad->TipoPlan));
-            }
-        }
-
-        return 'basico';
+        return $plan ? strtolower(trim($plan)) : 'sin plan';
     }
 
     /**

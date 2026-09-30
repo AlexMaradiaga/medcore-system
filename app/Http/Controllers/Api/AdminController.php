@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
+use App\Services\SaaSSubscriptionProvisioner;
 use Exception;
 
 class AdminController extends Controller
@@ -97,6 +98,8 @@ class AdminController extends Controller
                 'Estado'                 => 1
             ]);
 
+            app(SaaSSubscriptionProvisioner::class)->provisionDoctor((int) $usuarioId);
+
             DB::commit();
 
             return response()->json([
@@ -138,6 +141,7 @@ class AdminController extends Controller
 
             DB::table('Doctores')->where('DoctorID', $id)->update(['EsVerificado' => 1]);
             DB::table('Usuarios')->where('UsuarioID', $doctor->UsuarioID)->update(['Estado' => 1]);
+            app(SaaSSubscriptionProvisioner::class)->provisionDoctor((int) $doctor->UsuarioID);
 
             DB::commit();
 
@@ -159,8 +163,72 @@ class AdminController extends Controller
     public function obtenerUsuariosPorRol(Request $request): JsonResponse
     {
         $rol = $request->query('rol_id');
+        if ((int) $rol === 2) {
+            $usuarios = DB::table('Usuarios as U')
+                ->join('Doctores as D', 'D.UsuarioID', '=', 'U.UsuarioID')
+                ->leftJoin('Especialidades as E', 'E.EspecialidadID', '=', 'D.EspecialidadID')
+                ->where('U.RolID', 2)
+                ->select([
+                    'U.UsuarioID', 'U.Email', 'U.RolID', 'U.Estado', 'U.EsFounder',
+                    'U.NivelFounder', 'U.FechaFounder', 'D.DoctorID', 'D.Nombre', 'D.Apellido',
+                    'D.NumeroColegiado', 'D.RutaFoto', 'D.RutaTituloMedico',
+                    'D.RutaTituloEspecialista', 'D.RutaConstanciaColegio', 'D.RutaDni',
+                    'E.NombreEspecialidad as Especialidad',
+                    DB::raw("'Doctor' as NombreRol"),
+                    DB::raw("LTRIM(RTRIM(CONCAT(D.Nombre, ' ', D.Apellido))) as NombreCompleto"),
+                ])
+                ->orderByDesc('U.EsFounder')
+                ->orderBy('D.Nombre')
+                ->get();
+            return response()->json(['status' => 'success', 'data' => $usuarios]);
+        }
         $usuarios = DB::select("EXEC sp_ObtenerUsuariosAgrupados ?", [$rol ? (int)$rol : null]);
         return response()->json(['status' => 'success', 'data' => $usuarios]);
+    }
+
+    public function documentosDoctor(int $id): JsonResponse
+    {
+        $doctor = DB::table('Doctores')->where('DoctorID', $id)->first();
+        if (!$doctor) {
+            return response()->json(['status' => 'error', 'message' => 'Doctor no encontrado.'], 404);
+        }
+
+        $documentos = collect([
+            ['tipo' => 'Fotografía', 'ruta' => $doctor->RutaFoto],
+            ['tipo' => 'Título médico', 'ruta' => $doctor->RutaTituloMedico],
+            ['tipo' => 'Título de especialidad', 'ruta' => $doctor->RutaTituloEspecialista],
+            ['tipo' => 'Constancia de colegiación', 'ruta' => $doctor->RutaConstanciaColegio],
+            ['tipo' => 'Documento de identidad', 'ruta' => $doctor->RutaDni],
+        ])->filter(fn ($documento) => !empty($documento['ruta']))
+          ->map(fn ($documento) => array_merge($documento, [
+              'url' => url(Storage::disk('public')->url($documento['ruta'])),
+              'extension' => strtolower(pathinfo($documento['ruta'], PATHINFO_EXTENSION)),
+          ]))->values();
+
+        return response()->json(['status' => 'success', 'data' => $documentos]);
+    }
+
+    public function actualizarFounder(Request $request, int $id): JsonResponse
+    {
+        $validated = $request->validate([
+            'es_founder' => ['required', 'boolean'],
+            'nivel_founder' => ['nullable', 'integer', 'min:1', 'max:10'],
+        ]);
+        $doctor = DB::table('Doctores')->where('DoctorID', $id)->first();
+        if (!$doctor) {
+            return response()->json(['status' => 'error', 'message' => 'Doctor no encontrado.'], 404);
+        }
+
+        DB::table('Usuarios')->where('UsuarioID', $doctor->UsuarioID)->update([
+            'EsFounder' => $validated['es_founder'] ? 1 : 0,
+            'NivelFounder' => $validated['es_founder'] ? ($validated['nivel_founder'] ?? 1) : null,
+            'FechaFounder' => $validated['es_founder'] ? now() : null,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => $validated['es_founder'] ? 'El médico fue marcado como Founder.' : 'Se retiró la condición Founder.',
+        ]);
     }
 
     public function cambiarEstado(Request $request, $id)

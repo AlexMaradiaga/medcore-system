@@ -2,9 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\SaaSLimitService;
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 use Carbon\Carbon;
@@ -20,13 +20,17 @@ class ValidarLimitePlanSaaS
      * Límites por plan.
      */
     private const PLAN_LIMITS = [
-        'Gratis' => [
+        'gratis' => [
             'pacientes' => 10,
         ],
-        'Basico' => [
+        'basico' => [
             'pacientes' => 10,
         ],
     ];
+
+    public function __construct(private readonly SaaSLimitService $saasLimitService)
+    {
+    }
 
     /**
      * Handle an incoming request.
@@ -45,27 +49,8 @@ class ValidarLimitePlanSaaS
         // Obtener el ID del usuario soportando ambas convenciones (UsuarioID o id)
         $userId = $user->UsuarioID ?? $user->id;
 
-        /*
-        |--------------------------------------------------------------------------
-        | Obtener la suscripción desde caché usando UsuarioID
-        |--------------------------------------------------------------------------
-        */
-        $suscripcion = Cache::remember(
-            "suscripcion_usuario_{$userId}",
-            now()->addMinutes(self::CACHE_MINUTES),
-            function () use ($userId) {
-                return DB::table('Sistema_Suscripciones_SaaS')
-                    ->where('UsuarioID', $userId)
-                    ->first();
-            }
-        );
-
-        // Mapeo flexible de Plan (soporta PlanAsignado o TipoPlan)
-        $plan = $suscripcion?->PlanAsignado ?? $suscripcion?->TipoPlan ?? 'Gratis';
-
-        // Mapeo flexible de Estado (soporta EstadoSaaS como int/string o EstadoSuscripcion)
-        $estadoRaw = $suscripcion?->EstadoSaaS ?? $suscripcion?->EstadoSuscripcion ?? 'Activo';
-        $esActivo = ($estadoRaw == 1 || strtolower((string)$estadoRaw) === 'activo');
+        $plan = $this->saasLimitService->obtenerPlanUsuario((int) $userId);
+        $esActivo = $plan !== 'sin plan';
 
         /*
         |--------------------------------------------------------------------------
@@ -75,7 +60,7 @@ class ValidarLimitePlanSaaS
         if (!$esActivo) {
             return response()->json([
                 'status' => 'subscription_expired',
-                'message' => 'La suscripción de MedCore Global se encuentra vencida o suspendida.'
+                'message' => 'La suscripción de MedGo+ no existe, está vencida o suspendida.'
             ], 403);
         }
 

@@ -48,6 +48,7 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
             ->select(
                 'OL.OrdenID',
                 'OL.CodigoOrden',
+                'OL.ConsultaID',
                 'OL.LaboratorioID', // Estándar único en la base de datos
                 'OL.Estado',
                 'OL.MontoTotal',
@@ -55,6 +56,7 @@ class SqlLaboratoryRepository implements LaboratoryRepositoryInterface
                 'OL.ArchivoPdfPath',
                 'OL.FechaOrden',
                 'OL.FechaCompletado',
+                'OL.NotasClinicas',
                 DB::raw("COALESCE(E.NombreEntidad, 'Laboratorio Principal') as Laboratorio"),
                 DB::raw("TRIM(CONCAT(P.Nombre, ' ', COALESCE(P.Apellido, ''))) as Paciente"),
                 'P.DNI as PacienteDNI',

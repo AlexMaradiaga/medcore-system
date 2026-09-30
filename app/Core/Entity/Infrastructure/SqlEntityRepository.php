@@ -6,6 +6,7 @@ use App\Core\Entity\Domain\EntityRepositoryInterface;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\Request;
+use App\Services\SaaSSubscriptionProvisioner;
 
 class SqlEntityRepository implements EntityRepositoryInterface
 {
@@ -163,6 +164,7 @@ class SqlEntityRepository implements EntityRepositoryInterface
         return DB::transaction(function () use ($id) {
             DB::table('Entidades')->where('EntidadID', $id)->update(['Estado' => 1]);
             DB::table('Usuarios')->where('EntidadID', $id)->update(['Estado' => 1]);
+            app(SaaSSubscriptionProvisioner::class)->provisionEntity($id);
             return true;
         });
     }
